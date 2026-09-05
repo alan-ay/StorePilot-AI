@@ -5,169 +5,27 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 
 - [Overview](#overview)
 - [Features](#features)
-  - [Product Demand Forecasting](#product-demand-forecasting)
-  - [Intelligent Inventory & Replenishment](#intelligent-inventory--replenishment)
-  - [Adaptive Learning](#adaptive-learning)
-  - [Human-in-the-Loop Feedback](#human-in-the-loop-feedback)
-  - [Multi-Objective Optimization](#multi-objective-optimization)
-  - [What-If Scenario Simulation](#what-if-scenario-simulation)
-  - [Automated Purchase Orders](#automated-purchase-orders)
-  - [Multi-Store Inventory Coordination](#multi-store-inventory-coordination)
-  - [Natural-Language Business Reports](#natural-language-business-reports)
 - [Outcome](#outcome-daily-workflow)
+- [Start](#getting-started)
+- [Input_data](#input-data)
+- [Structure](#project-structure)
+- [Decision](#decision-flow)
+- [Current_scope](#current-scope)
+- [License](#license)
 
 
-## Overview
-
-StorePilot AI is an AI-powered retail decision-support system designed to automate demand forecasting, inventory planning, replenishment, and daily operational analysis for grocery and convenience stores.
-
-Rather than simply predicting future sales, StorePilot AI converts sales, inventory, supplier, and operational data into actionable business decisions. The system continuously learns from actual outcomes and store-owner feedback, allowing its forecasts and recommendations to adapt to individual stores over time.
-
-The long-term goal is to reduce the amount of manual decision-making required in daily store operations while keeping store owners in control of important purchasing and inventory decisions.
 
 
 ## Features
 
-### Product Demand Forecasting
-
-The system forecasts product-level demand over multiple time horizons:
-
-- Predict sales for the next **1 day, 7 days, and 30 days**.
-- Identify whether demand is **growing, stable, or declining**.
-- Provide **prediction intervals and confidence estimates** instead of only point forecasts.
-- Classify products as **core products, growth products, seasonal products, or slow-moving products**.
-- Distinguish between genuinely low demand and artificially low sales caused by **stockouts**.
-
-
-### Intelligent Inventory & Replenishment
-
-StorePilot AI combines demand forecasts with current inventory, safety stock, shelf life, and supplier lead times to determine:
-
-- Which products should be replenished.
-- When replenishment should occur.
-- Recommended order quantities.
-- Which products currently require no replenishment.
-- Products at risk of stockout.
-- Products with excessive inventory or approaching expiration dates.
-- Slow-moving products that may require promotion, markdown, or discontinued purchasing.
-
-The decision engine supports multiple operating strategies:
-
-- **Conservative** — prioritizes product availability and minimizes stockout risk.
-- **Balanced** — balances availability, inventory cost, and waste.
-- **Aggressive** — minimizes inventory holding and capital usage.
-- **Custom** — allows users to configure their own risk and optimization preferences.
-
-
-### Adaptive Learning
-
-The system continuously compares predicted demand with actual sales and uses forecasting errors to improve:
-
-- Product demand models.
-- Seasonal and periodic patterns.
-- Safety-stock levels.
-- Replenishment quantities.
-- Estimated effects of promotions, holidays, weather, and other external factors.
-
-As more operational data becomes available, the system gradually adapts to the characteristics of each **store, region, and customer base**, reducing the need for frequent manual model configuration.
-
-
-### Human-in-the-Loop Feedback
-
-Store owners can **accept, modify, or reject** system recommendations and provide reasons such as:
-
-- Supplier stock shortages.
-- Upcoming promotions.
-- School holidays.
-- Weather changes.
-- Budget constraints.
-- Storage limitations.
-- Manager experience or judgment.
-- Unexpected large orders.
-
-The system records these decisions and evaluates their actual outcomes.
-
-This feedback becomes an additional learning signal for improving future forecasts and recommendations while ensuring that important business decisions remain under human control.
-
-
-### Multi-Objective Optimization
-
-StorePilot AI does not optimize forecasting accuracy alone. The decision engine considers multiple business objectives simultaneously:
-
-- Profit.
-- Stockout rate.
-- Product waste and expiration rate.
-- Inventory turnover.
-- Capital tied up in inventory.
-- Customer demand fulfillment.
-- Storage-space utilization.
-
-Users can adjust the relative importance of these objectives.
-
-For example, a convenience store may prioritize product availability, while a fresh-food retailer may assign greater importance to reducing expiration and waste.
-
-
-### What-If Scenario Simulation
-
-Store owners can simulate operational changes before implementing them, including:
-
-- Price increases or reductions.
-- Discounts and promotional campaigns.
-- Holiday demand changes.
-- Weather changes.
-- Supplier delivery delays.
-- School opening or holiday periods.
-- Temporary product shortages.
-- Expected increases or decreases in overall customer traffic.
-
-The system compares projected **sales, profit, inventory levels, and stockout risks** across scenarios to support better operational decisions.
-
-
-### Automated Purchase Orders
-
-Once replenishment recommendations are approved, the system can:
-
-- Group products by supplier.
-- Generate product names, SKUs, quantities, and estimated costs.
-- Check minimum order quantities.
-- Respect case-pack and purchasing constraints.
-- Consider supplier lead times and price differences.
-- Generate purchase orders in **Excel, PDF, or structured system formats**.
-- Record modifications and approval history.
-
-In a more advanced deployment, StorePilot AI can integrate directly with supplier systems and submit approved purchase orders automatically.
-
-
-### Multi-Store Inventory Coordination
-
-For businesses operating multiple stores, the system can:
-
-- Compare inventory and demand across locations.
-- Detect situations where one store faces a shortage while another has excess stock.
-- Recommend inter-store inventory transfers.
-- Compare the cost of **inventory transfer vs. new procurement**.
-- Coordinate purchasing and distribution across stores.
-- Optimize product assortments according to regional demand differences.
-
-
-### Natural-Language Business Reports
-
-StorePilot AI automatically generates a daily operational report in natural language.
-
-Example:
-
-> Yesterday's sales increased by 8% compared with the same day last week. Demand for bottled water and instant noodles continues to rise. Bottled water is expected to stock out within two days, and replenishment of 120 bottles is recommended. Milk inventory is currently above the target level, with several batches approaching expiration within five days. A 10% promotional discount is recommended. Due to the weekend and high temperatures, beverage demand is expected to increase by approximately 15–22% over the next three days.
-
-Daily reports include:
-
-- Overall sales performance.
-- Major growing and declining products.
-- Stockout and overstock risks.
-- Today's replenishment priorities.
-- Expiration and promotion recommendations.
-- Inter-store transfer recommendations.
-- Operational anomalies.
-- Forecast confidence and risk warnings.
+- 1/7/30-day SKU demand forecasts with uncertainty ranges;
+- adjustable conservative, balanced and growth strategies;
+- replenishment, overstock, stockout and expiry-risk recommendations;
+- price, promotion, holiday, traffic and supplier-delay simulations;
+- multi-store stock-transfer suggestions;
+- human feedback records and adaptive model retraining;
+- supplier-grouped purchase orders;
+- a daily Chinese management report.
 
 
 ## Outcome: Daily Workflow
@@ -183,3 +41,90 @@ Each day, the store owner only needs to:
 5. Allow the system to observe actual outcomes and **continuously improve its models and future decisions**.
 
 The long-term objective is to transform StorePilot AI from a forecasting tool into an **adaptive retail decision engine** capable of supporting increasingly autonomous store operations.
+
+
+## Getting started
+
+```bash
+python -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+pip install -e .
+streamlit run app.py
+```
+
+The dashboard starts with a reproducible two-store sample dataset. Turn off
+**Use built-in demo data** in the sidebar to upload store data as CSV files.
+
+To verify the core system without starting the dashboard:
+
+```bash
+python -m storepilot.demo
+python -m unittest discover -s tests -v
+```
+
+## Input data
+
+### `sales.csv`
+
+Required: `date, store_id, sku, units`. Optional: `price, promotion, stockout`.
+
+### `products.csv`
+
+Required: `sku, product_name, category, supplier_id, cost, price`. Optional:
+`shelf_life_days, lead_time_days, case_pack, min_order_qty`.
+
+### `inventory.csv`
+
+Required: `store_id, sku, on_hand`. Optional: `on_order`.
+
+See `docs/DATA_SCHEMA.md` for validation rules and examples.
+
+## Project structure
+
+```text
+storepilot/
+├── app.py                       Streamlit dashboard
+├── storepilot/
+│   ├── forecasting.py          demand model and uncertainty intervals
+│   ├── optimization.py         reorder, budget and transfer decisions
+│   ├── scenarios.py            what-if adjustments
+│   ├── repository.py           SQLite feedback and model-run history
+│   └── reporting.py            Chinese daily operating report
+├── tests/                       unit and integration tests
+└── docs/DATA_SCHEMA.md          input contracts
+```
+
+## Decision flow
+
+```mermaid
+flowchart TD
+    A[Sales, inventory and products] --> B[Demand forecast]
+    B --> C[Scenario adjustment]
+    C --> D[Inventory decisions]
+    D --> E[Replenishment and transfers]
+    E --> F[Owner review]
+    F --> G[Recorded outcomes]
+    G --> B
+```
+
+## Current scope
+
+The core calculations, schemas, feedback persistence and exports are working.
+For a commercial deployment, add POS/supplier integrations, authentication,
+database migrations, scheduled retraining, monitoring and a controlled A/B
+pilot before enabling automatic order submission.
+
+## Safety rule
+
+Purchase orders are generated as drafts. The MVP never sends an order to a
+supplier automatically; an owner must approve it first.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local checks and pull-request
+requirements. Changes to forecasting or replenishment behaviour should include
+a focused test and a short explanation of the business assumption being changed.
+
+## License
+
+Copyright © 2026 Jingming Yang. All rights reserved. See [LICENSE](LICENSE).
