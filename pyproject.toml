@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "storepilot-retail"
+version = "0.1.0"
+description = "Adaptive demand forecasting and inventory decision support for small retailers"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Jingming Yang" }]
+license = { file = "LICENSE" }
+keywords = ["retail", "demand-forecasting", "inventory", "replenishment"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: End Users/Desktop",
+  "License :: Other/Proprietary License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "scikit-learn>=1.4",
+  "streamlit>=1.63,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+storepilot-demo = "storepilot.demo:main"
+
+[tool.setuptools.packages.find]
+include = ["storepilot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
