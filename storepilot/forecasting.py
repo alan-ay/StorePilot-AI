@@ -30,7 +30,7 @@ class ForecastMetrics:
     wape: float
     interval_coverage: float
     validation_rows: int
-    model_name: str = "HistGradientBoosting + seasonal fallback"
+    model_name: str = "HistGradientBoostingRegressor"
 
 
 class AdaptiveDemandForecaster:
@@ -119,8 +119,11 @@ class AdaptiveDemandForecaster:
         train = features[features["date"] < cutoff]
         valid = features[features["date"] >= cutoff]
         if len(train) < 30 or valid.empty:
-            split = max(1, int(len(features) * 0.8))
-            train, valid = features.iloc[:split], features.iloc[split:]
+            dates = sorted(features["date"].unique())
+            cutoff = dates[max(1, int(len(dates) * 0.8))]
+            train, valid = features[features["date"] < cutoff], features[features["date"] >= cutoff]
+        if len(train) < 30 or len(valid) < 7:
+            raise ValueError("可验证的历史不足，建议导入至少 70 天的每日销量")
 
         self.model = HistGradientBoostingRegressor(
             learning_rate=0.06,
@@ -133,8 +136,8 @@ class AdaptiveDemandForecaster:
         valid_prediction = np.maximum(0, self.model.predict(valid[FEATURE_COLUMNS]))
         residuals = valid["demand_target"].to_numpy() - valid_prediction
         self.residual_quantiles = (
-            float(np.quantile(residuals, 0.10)),
-            float(np.quantile(residuals, 0.90)),
+            min(0.0, float(np.quantile(residuals, 0.10))),
+            max(0.0, float(np.quantile(residuals, 0.90))),
         )
         actual = valid["demand_target"].to_numpy()
         lower = np.maximum(0, valid_prediction + self.residual_quantiles[0])

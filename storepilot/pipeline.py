@@ -39,7 +39,19 @@ class StorePilotPipeline:
         data = validate_data(data)
         strategy = strategy or StrategyConfig.preset("平衡")
         scenario = scenario or ScenarioConfig()
-        forecast_days = max(horizon_days, 30)
+        strategy.validate()
+        scenario.validate()
+        if not 1 <= horizon_days <= 90:
+            raise ValueError("预测周期必须在 1 到 90 天之间")
+        forecast_days = max(
+            horizon_days,
+            30,
+            int(data.products.lead_time_days.max())
+            + scenario.supplier_delay_days
+            + strategy.review_period_days,
+        )
+        if forecast_days > 90:
+            raise ValueError("交货与补货周期合计不能超过 90 天")
         self.forecaster.fit(data.sales)
         base_forecast = self.forecaster.predict(forecast_days)
         adjusted = apply_scenario(base_forecast, scenario)
