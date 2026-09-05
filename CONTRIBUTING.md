@@ -14,6 +14,7 @@ Run the same checks used by continuous integration:
 
 ```bash
 ruff check .
+ruff format --check .
 python -W error -m unittest discover -s tests -v
 python -m compileall -q storepilot app.py tests
 ```
