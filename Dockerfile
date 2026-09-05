@@ -1,9 +1,10 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY storepilot ./storepilot
 COPY app.py ./
+COPY .streamlit/config.toml ./.streamlit/config.toml
 RUN pip install --no-cache-dir .
 
 EXPOSE 8501
