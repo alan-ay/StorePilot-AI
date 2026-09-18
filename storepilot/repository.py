@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from .forecasting import ForecastMetrics
+from .i18n import ValidationError
 from .workbench import prepare_review
 
 
@@ -111,7 +112,7 @@ class FeedbackRepository:
                 (scope, payload["store_id"], payload["supplier_id"]),
             ).fetchone()
             if locked:
-                raise ValueError("该供应商的采购单已审核。请在新的数据批次中处理后续采购")
+                raise ValidationError("该供应商的采购单已审核。请在新的数据批次中处理后续采购")
             connection.execute(
                 """INSERT INTO reviewed_lines VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(scope, store_id, sku) DO UPDATE SET
@@ -184,7 +185,7 @@ class FeedbackRepository:
             ).fetchall()
             all_lines = [json.loads(r["payload"]) for r in records]
             if budget is not None and sum(r["line_total"] for r in all_lines) > budget + 0.001:
-                raise ValueError("本批次的确认金额超过采购预算，请调整清单后再审核")
+                raise ValidationError("本批次的确认金额超过采购预算，请调整清单后再审核")
             lines = [
                 r
                 for r in all_lines
@@ -193,7 +194,7 @@ class FeedbackRepository:
                 and r["final_qty"] > 0
             ]
             if not lines:
-                raise ValueError("该供应商没有待审核的采购明细")
+                raise ValidationError("该供应商没有待审核的采购明细")
             order_id = "PO-" + uuid.uuid4().hex[:12].upper()
             connection.execute(
                 "INSERT INTO purchase_batches VALUES (?, ?, ?, ?, ?, ?)",

@@ -7,6 +7,7 @@ import pandas as pd
 from .config import ScenarioConfig, StrategyConfig
 from .data import RetailData, validate_data
 from .forecasting import AdaptiveDemandForecaster, ForecastMetrics
+from .i18n import ValidationError
 from .optimization import InventoryOptimizer, build_purchase_orders
 from .reporting import generate_chinese_report
 from .scenarios import apply_scenario
@@ -42,7 +43,7 @@ class StorePilotPipeline:
         strategy.validate()
         scenario.validate()
         if not 1 <= horizon_days <= 90 or horizon_days % 1:
-            raise ValueError("预测周期必须为 1 到 90 天之间的整数")
+            raise ValidationError("预测周期必须为 1 到 90 天之间的整数")
         forecast_days = max(
             horizon_days,
             30,
@@ -51,7 +52,7 @@ class StorePilotPipeline:
             + strategy.review_period_days,
         )
         if forecast_days > 90:
-            raise ValueError("交货与补货周期合计不能超过 90 天")
+            raise ValidationError("交货与补货周期合计不能超过 90 天")
         self.forecaster.fit(data.sales)
         base_forecast = self.forecaster.predict(int(forecast_days))
         adjusted = apply_scenario(base_forecast, scenario)

@@ -7,6 +7,8 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error
 
+from .i18n import ValidationError
+
 FEATURE_COLUMNS = [
     "store_code",
     "sku_code",
@@ -113,7 +115,7 @@ class AdaptiveDemandForecaster:
         self.history = history
         features = self._features(history).dropna(subset=FEATURE_COLUMNS)
         if len(features) < 40:
-            raise ValueError("有效历史数据不足：至少需要约 6 周的每日销售数据")
+            raise ValidationError("有效历史数据不足：至少需要约 6 周的每日销售数据")
 
         cutoff = features["date"].max() - pd.Timedelta(days=13)
         train = features[features["date"] < cutoff]
@@ -121,11 +123,11 @@ class AdaptiveDemandForecaster:
         if len(train) < 30 or valid.empty:
             dates = sorted(features["date"].unique())
             if len(dates) < 2:
-                raise ValueError("可验证的历史不足，建议导入至少 70 天的每日销量")
+                raise ValidationError("可验证的历史不足，建议导入至少 70 天的每日销量")
             cutoff = dates[max(1, int(len(dates) * 0.8))]
             train, valid = features[features["date"] < cutoff], features[features["date"] >= cutoff]
         if len(train) < 30 or len(valid) < 7:
-            raise ValueError("可验证的历史不足，建议导入至少 70 天的每日销量")
+            raise ValidationError("可验证的历史不足，建议导入至少 70 天的每日销量")
 
         self.model = HistGradientBoostingRegressor(
             learning_rate=0.06,
@@ -158,7 +160,7 @@ class AdaptiveDemandForecaster:
         if self.model is None or self.history is None:
             raise RuntimeError("请先调用 fit()")
         if not 1 <= horizon_days <= 90 or horizon_days % 1:
-            raise ValueError("预测周期必须为 1 到 90 天之间的整数")
+            raise ValidationError("预测周期必须为 1 到 90 天之间的整数")
         horizon_days = int(horizon_days)
 
         working = self.history.copy()

@@ -243,6 +243,194 @@ class DashboardTests(unittest.TestCase):
         self.assertTrue(self.app.session_state["active_data"].inventory.equals(data.inventory))
         self.visit("今日概览")
 
+    def test_demo_catalog_refresh_does_not_replace_imported_data(self):
+        from storepilot.data import DEMO_CATALOG_VERSION
+
+        data = self.app.session_state["active_data"]
+        data.products.loc[0, "product_name"] = "旧演示食品"
+        self.app.session_state["demo_catalog_version"] = "old"
+        self.app.run()
+        self.assertNoFailure()
+        self.assertEqual(self.app.session_state["demo_catalog_version"], DEMO_CATALOG_VERSION)
+        self.assertNotIn(
+            "旧演示食品", self.app.session_state["active_data"].products.product_name.tolist()
+        )
+
+        data = self.app.session_state["active_data"]
+        data.products.loc[0, "product_name"] = "My imported product"
+        self.app.session_state["source"] = "门店数据"
+        self.app.session_state["demo_catalog_version"] = "old"
+        self.app.run()
+        self.assertNoFailure()
+        self.assertIn(
+            "My imported product",
+            self.app.session_state["active_data"].products.product_name.tolist(),
+        )
+
+    def test_english_pages_translate_visible_content(self):
+        self.app.radio(key="language").set_value("en").run()
+        self.assertEqual(self.app.radio(key="nav").options[0], "Overview")
+        with patch(
+            "storepilot.pipeline.StorePilotPipeline.run",
+            side_effect=AssertionError("unexpected retrain"),
+        ):
+            for page in [
+                "今日概览",
+                "补货清单",
+                "采购与记录",
+                "销售走势",
+                "情景测算",
+                "门店调拨",
+                "数据与设置",
+            ]:
+                self.visit(page)
+                for kind in ["markdown", "caption", "subheader", "info", "warning"]:
+                    for element in self.app.get(kind):
+                        self.assertNotRegex(
+                            element.value, r"[\u4e00-\u9fff]", f"{page}: {element.value}"
+                        )
+                for kind in [
+                    "button",
+                    "selectbox",
+                    "radio",
+                    "checkbox",
+                    "slider",
+                    "number_input",
+                    "text_input",
+                    "file_uploader",
+                    "download_button",
+                ]:
+                    for element in self.app.get(kind):
+                        if kind == "radio" and element.key == "language":
+                            continue
+                        for label in [element.label] + list(getattr(element, "options", [])):
+                            self.assertNotRegex(label, r"[\u4e00-\u9fff]", f"{page}: {label}")
+                for element in self.app.dataframe:
+                    for label in list(element.value.columns) + list(element.value.to_numpy().flat):
+                        if isinstance(label, str):
+                            self.assertNotRegex(label, r"[\u4e00-\u9fff]", f"{page}: {label}")
+
+    def test_language_switch_preserves_review_scope_and_store(self):
+        from storepilot.workbench import dataset_key, decision_scope
+
+        self.visit("补货清单")
+        self.app.selectbox(key="store_scope").set_value("STORE-01").run()
+        self.app.selectbox(key="review_item").set_value(("STORE-01", "SKU001")).run()
+        next(r for r in self.app.radio if r.key.startswith("action:")).set_value("修改").run()
+        next(n for n in self.app.number_input if n.key.startswith("qty:")).set_value(24)
+        next(s for s in self.app.selectbox if s.key.startswith("reason:")).set_value("库存复核")
+        self.button("保存安排").click().run()
+        data = self.app.session_state["active_data"]
+        scope = decision_scope(dataset_key(data, "演示数据"), self.app.session_state["policy"])
+        repo = FeedbackRepository(self.database.with_name("test-demo.db"))
+        self.assertEqual(len(repo.reviews(scope)), 1)
+        self.app.selectbox(key="status_filter").set_value("已处理").run()
+        self.app.radio(key="language").set_value("en").run()
+        self.assertNoFailure()
+        self.assertEqual(self.app.radio(key="nav").value, "补货清单")
+        self.assertEqual(self.app.selectbox(key="store_scope").value, "STORE-01")
+        self.assertEqual(self.app.selectbox(key="status_filter").value, "已处理")
+        self.assertEqual(
+            next(n for n in self.app.number_input if n.key.startswith("qty:")).value, 24
+        )
+        self.visit("采购与记录")
+        next(c for c in self.app.checkbox if "checked quantities" in c.label).check().run()
+        self.app.radio(key="language").set_value("zh").run()
+        self.assertTrue(next(c for c in self.app.checkbox if "已核对" in c.label).value)
+        self.button("审核本单").click().run()
+        self.assertNoFailure()
+        self.assertEqual(len(repo.orders(scope)), 1)
+        self.assertEqual(repo.orders(scope).iloc[0].final_qty, 24)
+
+    def test_english_import_errors_and_examples(self):
+        self.app.radio(key="language").set_value("en").run()
+        self.visit("数据与设置")
+        with patch("streamlit.download_button") as download:
+            self.app.run()
+        import pandas as pd
+
+        examples = {
+            call.args[2]: pd.read_csv(io.BytesIO(call.args[1]))
+            for call in download.call_args_list
+            if len(call.args) >= 3
+            and call.args[2] in {"sales.csv", "products.csv", "inventory.csv"}
+        }
+        self.assertEqual(set(examples), {"sales.csv", "products.csv", "inventory.csv"})
+        self.assertIn(
+            "Dishwashing sponges (2 pack)", examples["products.csv"].product_name.tolist()
+        )
+        self.assertEqual(
+            set(examples["products.csv"].category),
+            {"Household cleaning", "Laundry care", "Personal care", "Paper goods"},
+        )
+        original = self.app.session_state["active_data"]
+        examples["inventory.csv"].loc[0, "on_hand"] = -1
+        uploads = []
+        for name in ["sales.csv", "products.csv", "inventory.csv"]:
+            upload = io.BytesIO(examples[name].to_csv(index=False).encode())
+            upload.size = len(upload.getvalue())
+            uploads.append(upload)
+        with patch("streamlit.file_uploader", side_effect=uploads):
+            self.button("Validate and use these files").click().run()
+        self.assertFalse(list(self.app.exception))
+        self.assertTrue(
+            any("on_hand must not be negative" in error.value for error in self.app.error)
+        )
+        self.assertTrue(self.app.session_state["active_data"].inventory.equals(original.inventory))
+
+    def test_imported_names_are_preserved_when_switching_language(self):
+        data = self.app.session_state["active_data"]
+        self.app.session_state["source"] = "门店数据"
+        self.app.radio(key="language").set_value("en").run()
+        self.visit("补货清单")
+        self.app.selectbox(key="status_filter").set_value("全部商品").run()
+        self.assertNoFailure()
+        names = self.app.dataframe[0].value["Product"].tolist()
+        self.assertTrue(set(names).issubset(set(data.products.product_name)))
+        self.app.radio(key="language").set_value("zh").run()
+        self.assertEqual(self.app.session_state["source"], "门店数据")
+        self.assertTrue(self.app.session_state["active_data"].products.equals(data.products))
+
+    def test_english_scenario_export_keeps_numbers_and_translates_labels(self):
+        import pandas as pd
+
+        self.app.radio(key="language").set_value("en").run()
+        self.visit("情景测算")
+        self.app.slider(key="scenario_traffic").set_value(20)
+        with patch("streamlit.download_button") as download:
+            self.button("Compare scenario").click().run()
+        self.assertNoFailure()
+        payload = next(
+            call.args[1] for call in download.call_args_list if call.args[2] == "scenario-plan.csv"
+        )
+        exported = pd.read_csv(io.BytesIO(payload))
+        self.assertIn("Product", exported.columns)
+        self.assertIn("Suggested order", exported.columns)
+        for value in exported.select_dtypes(include=["object", "string"]).to_numpy().flat:
+            if isinstance(value, str):
+                self.assertNotRegex(value, r"[\u4e00-\u9fff]")
+        saved = self.app.session_state["scenario_result"]
+        self.assertEqual(exported["Suggested order"].sum(), saved[3].suggested_order_qty.sum())
+        self.app.radio(key="language").set_value("zh").run()
+        self.assertNoFailure()
+        self.assertEqual(self.app.session_state["scenario_result"][0], saved[0])
+        self.assertEqual(self.app.session_state["scenario_result"][1], saved[1])
+
+    def test_language_switch_keeps_saved_budget_and_custom_preferences(self):
+        self.visit("数据与设置")
+        self.app.checkbox(key="policy_budget_enabled").check()
+        self.app.number_input(key="policy_budget").set_value(0.0)
+        self.app.checkbox(key="policy_custom").check()
+        self.app.number_input(key="policy_safety").set_value(3.0)
+        self.button("保存备货偏好").click().run()
+        policy = self.app.session_state["policy"]
+        self.app.radio(key="language").set_value("en").run()
+        self.assertNoFailure()
+        self.assertEqual(self.app.number_input(key="policy_budget").value, 0.0)
+        self.assertTrue(self.app.checkbox(key="policy_custom").value)
+        self.assertEqual(self.app.number_input(key="policy_safety").value, 3.0)
+        self.assertEqual(self.app.session_state["policy"], policy)
+
 
 def tearDownModule():
     # AppTest owns a module-level temporary directory; close it before warning-strict exit.

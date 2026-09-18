@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .config import ScenarioConfig, StrategyConfig
+from .i18n import ValidationError
 
 
 def _round_order(quantity: float, case_pack: int, minimum: int) -> int:
@@ -47,7 +48,7 @@ class InventoryOptimizer:
             lead_time = max(1, int(product["lead_time_days"]) + scenario.supplier_delay_days)
             protection_days = int(lead_time + strategy.review_period_days)
             if len(sku_forecast) < protection_days:
-                raise ValueError("预测天数不足以覆盖交货周期与补货周期")
+                raise ValidationError("预测天数不足以覆盖交货周期与补货周期")
             protected = sku_forecast.head(protection_days)
             expected_demand = float(protected["predicted_units"].sum())
             # A zero-demand scenario also has zero uncertainty; do not invent safety stock.
@@ -133,7 +134,7 @@ class InventoryOptimizer:
             )
 
         if not rows:
-            raise ValueError("库存与销售数据中没有可匹配的门店商品")
+            raise ValidationError("库存与销售数据中没有可匹配的门店商品")
         recommendations = pd.DataFrame(rows).sort_values(
             ["priority_score", "expected_shortage"], ascending=False
         )

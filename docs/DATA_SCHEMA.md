@@ -68,3 +68,15 @@ An inventory item without matching store/SKU sales history is listed in the data
 settings as unforecastable. If no inventory matches sales, the import is rejected.
 An upload is limited to 25 MB across all three files and is activated only after
 validation and forecast fitting succeed.
+
+## Sample catalog
+
+The built-in demo and downloadable CSV examples use only non-food household
+essentials: dishwashing sponges and liquid, laundry soap, hand wash, toothbrushes,
+tissues, bin bags, and kitchen towels. Sales and inventory reference the same
+eight SKUs across two stores. Shelf lives are illustrative product storage periods,
+not batch expiry dates.
+
+This sample catalog does not restrict imports. Your uploaded product names and
+categories are retained, including when the interface language changes. CSV
+column names such as `product_name` and `category` stay the same in both languages.
