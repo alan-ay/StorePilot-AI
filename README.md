@@ -25,7 +25,7 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 - multi-store stock-transfer suggestions;
 - human feedback records and adaptive model retraining;
 - supplier-grouped purchase orders;
-- a daily Chinese management report.
+- Chinese and English navigation, forms, charts, exports, and daily reports.
 
 
 ## Daily Workflow
@@ -59,8 +59,14 @@ CSV examples contain non-food household essentials: cleaning products, laundry
 supplies, toiletries, and paper goods. Uploaded product names and categories are
 preserved; uploads are not restricted to this sample catalog.
 
-Import your own files through **数据与设置 → 导入数据**. No external model service
-or API key is needed.
+Choose **中文** or **English** using **Language / 语言** in the sidebar. The choice
+applies throughout the current session and leaves store selections, purchasing
+preferences, and saved reviews intact. Sample product names and example CSV
+values follow the selected language; import column names stay unchanged. Amounts
+remain in CNY in both languages.
+
+Import your own files through **Data & settings → Import data**
+(**数据与设置 → 导入数据**). No external model service or API key is needed.
 
 ## Input data
 
@@ -89,7 +95,8 @@ storepilot/
 │   ├── optimization.py         reorder, budget and transfer decisions
 │   ├── scenarios.py            what-if adjustments
 │   ├── repository.py           SQLite feedback and model-run history
-│   └── reporting.py            Chinese daily operating report
+│   ├── i18n.py                 Chinese and English interface messages
+│   └── reporting.py            Daily operating reports
 ├── tests/                       unit and integration tests
 └── docs/DATA_SCHEMA.md          input contracts
 ```

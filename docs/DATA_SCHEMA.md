@@ -78,4 +78,5 @@ eight SKUs across two stores. Shelf lives are illustrative product storage perio
 not batch expiry dates.
 
 This sample catalog does not restrict imports. Your uploaded product names and
-categories are retained.
+categories are retained, including when the interface language changes. CSV
+column names such as `product_name` and `category` stay the same in both languages.

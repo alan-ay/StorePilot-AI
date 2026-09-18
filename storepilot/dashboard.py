@@ -15,9 +15,10 @@ import streamlit as st
 
 from .config import ScenarioConfig, StrategyConfig
 from .data import DEMO_CATALOG_VERSION, RetailData, generate_demo_data, validate_data
+from .i18n import ValidationError, demo_label, translate
 from .optimization import InventoryOptimizer
 from .pipeline import StorePilotPipeline
-from .reporting import generate_chinese_report
+from .reporting import generate_report
 from .repository import FeedbackRepository
 from .workbench import dataset_key, decision_scope, download_csv, scenario_plan, scoped
 
@@ -62,21 +63,57 @@ COLUMNS = {
 }
 
 
-def table(frame, columns=None, **kwargs):
-    selected = frame[columns].copy() if columns else frame.copy()
+def language():
+    return st.session_state.get("language", "zh")
+
+
+def t(message, *values):
+    values = [
+        value.render(language()) if isinstance(value, ValidationError) else value
+        for value in values
+    ]
+    return translate(message, language(), *values)
+
+
+def product_label(value):
+    return demo_label(value, language()) if st.session_state.get("source") == "演示数据" else value
+
+
+def option_labels(options, formatter=t):
+    """Bind labels to this render without changing the options' stored values."""
+    return {value: formatter(value) for value in options}.get
+
+
+def display_frame(frame, *, rename_columns=True):
+    selected = frame.copy()
     if "status" in selected:
         selected["status"] = selected["status"].map(STATUS).fillna(selected["status"])
     if "days_of_cover" in selected:
         selected["days_of_cover"] = selected["days_of_cover"].replace(math.inf, None)
-    st.dataframe(selected.rename(columns=COLUMNS), hide_index=True, width="stretch", **kwargs)
+    for column in ["status", "确认状态", "action", "reason", "approval_status", "trend", "指标"]:
+        if column in selected:
+            selected[column] = selected[column].map(
+                lambda value: t(value) if isinstance(value, str) else value
+            )
+    for column in ["product_name", "category"]:
+        if column in selected:
+            selected[column] = selected[column].map(product_label)
+    if rename_columns:
+        selected = selected.rename(columns=lambda name: t(COLUMNS.get(name, name)))
+    return selected
+
+
+def table(frame, columns=None, **kwargs):
+    selected = frame[columns] if columns else frame
+    st.dataframe(display_frame(selected), hide_index=True, width="stretch", **kwargs)
 
 
 def empty(message):
-    st.markdown(f'<div class="sp-empty">{escape(message)}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sp-empty">{escape(t(message))}</div>', unsafe_allow_html=True)
 
 
 def cover_text(days):
-    return f"约可售 {days:g} 天" if math.isfinite(days) else "暂无销售需求"
+    return t("约可售 {0:g} 天", days) if math.isfinite(days) else t("暂无销售需求")
 
 
 def go(page):
@@ -84,12 +121,12 @@ def go(page):
 
 
 def notice(message):
-    st.session_state["notice"] = message
+    st.session_state["notice"] = t(message)
 
 
 def heading(title, subtitle):
     st.markdown(
-        f'<h1 class="sp-heading">{escape(title)}</h1><p class="sp-intro">{escape(subtitle)}</p>',
+        f'<h1 class="sp-heading">{escape(t(title))}</h1><p class="sp-intro">{escape(t(subtitle))}</p>',
         unsafe_allow_html=True,
     )
 
@@ -98,9 +135,9 @@ def metrics(items):
     for col, (label, value, note, tone) in zip(st.columns(len(items)), items, strict=True):
         with col:
             st.markdown(
-                f'<div class="sp-metric"><div class="sp-metric-label">{escape(label)}</div>'
-                f'<div class="sp-metric-value {tone}">{escape(str(value))}</div>'
-                f'<div class="sp-metric-note">{escape(note)}</div></div>',
+                f'<div class="sp-metric"><div class="sp-metric-label">{escape(t(label))}</div>'
+                f'<div class="sp-metric-value {tone}">{escape(t(str(value)))}</div>'
+                f'<div class="sp-metric-note">{escape(t(note))}</div></div>',
                 unsafe_allow_html=True,
             )
     st.write("")
@@ -150,7 +187,9 @@ def overview(data, base, rec, store, repo, scope, policy):
     before = sales[sales.date == latest_date - pd.Timedelta(days=7)]
     previous = float((before.units * before.price).sum())
     change = (
-        f"较上周同日 {(revenue / previous - 1) * 100:+.1f}%" if previous else "上周同日数据不足"
+        t("较上周同日 {0:+.1f}%", (revenue / previous - 1) * 100)
+        if previous
+        else t("上周同日数据不足")
     )
     urgent = local[local.status == "高缺货风险"]
     orders = scoped(repo.orders(scope), store)
@@ -163,17 +202,17 @@ def overview(data, base, rec, store, repo, scope, policy):
     )
     metrics(
         [
-            ("最近营业额", f"¥{revenue:,.0f}", f"{latest_date:%m月%d日} · {change}", ""),
+            ("最近营业额", f"¥{revenue:,.0f}", t("{0:%m月%d日} · {1}", latest_date, change), ""),
             (
                 "优先补货",
-                f"{len(urgent)} 项",
+                t("{0} 项", len(urgent)),
                 "现货预计撑不到补货到达",
                 "attention" if len(urgent) else "",
             ),
             ("待审核采购", f"¥{pending.line_total.sum():,.0f}", "已确认清单的采购金额", "primary"),
             (
                 "库存需复核",
-                f"{int((local.expiry_risk_units > 0).sum())} 项",
+                t("{0} 项", int((local.expiry_risk_units > 0).sum())),
                 "需核对批次保质期",
                 "",
             ),
@@ -181,45 +220,59 @@ def overview(data, base, rec, store, repo, scope, policy):
     )
     left, right = st.columns([1.65, 1], gap="large")
     with left, st.container(border=True):
-        st.subheader("待办清单")
+        st.subheader(t("待办清单"))
         tasks = local[local.status != "正常"].head(4)
         if tasks.empty:
             empty("目前没有紧急事项，可以继续查看本周销售情况。")
         for row in tasks.itertuples():
-            text = (
-                f"{row.store_id} · 现货 {row.on_hand:g} 件，{cover_text(row.days_of_cover)}；"
-                f"交货需 {row.lead_time_days} 天。"
+            text = t(
+                "{0} · 现货 {1:g} 件，{2}；交货需 {3} 天。",
+                row.store_id,
+                row.on_hand,
+                cover_text(row.days_of_cover),
+                row.lead_time_days,
             )
             st.markdown(
-                f'<div class="sp-task"><div class="sp-task-title">{escape(row.product_name)}'
-                f'<span class="sp-label">{STATUS[row.status]}</span></div>'
+                f'<div class="sp-task"><div class="sp-task-title">{escape(product_label(row.product_name))}'
+                f'<span class="sp-label">{escape(t(STATUS[row.status]))}</span></div>'
                 f'<div class="sp-task-detail">{escape(text)}</div></div>',
                 unsafe_allow_html=True,
             )
         st.button(
-            "查看并处理补货清单",
+            t("查看并处理补货清单"),
             key="open_replenishment",
             on_click=go,
             args=("补货清单",),
             type="primary",
         )
     with right, st.container(border=True):
-        st.subheader("销售概况")
+        st.subheader(t("销售概况"))
         daily = (
             sales.assign(营业额=sales.units * sales.price).groupby("date")["营业额"].sum().tail(14)
         )
-        st.line_chart(daily, color="#2458d3", height=230, x_label="日期", y_label="营业额（元）")
-        st.caption(f"当前采用{policy.name}策略 · {len(local)} 项门店商品")
-        st.button("查看商品走势", key="open_trends", on_click=go, args=("销售走势",))
-    with st.expander("查看当日经营摘要"):
+        st.line_chart(
+            daily.rename(t("营业额")),
+            color="#2458d3",
+            height=230,
+            x_label=t("日期"),
+            y_label=t("营业额（元）"),
+        )
+        st.caption(t("当前采用{0}策略 · {1} 项门店商品", t(policy.name), len(local)))
+        st.button(t("查看商品走势"), key="open_trends", on_click=go, args=("销售走势",))
+    with st.expander(t("查看当日经营摘要")):
         transfers = InventoryOptimizer().suggest_transfers(rec)
         if store != "全部门店":
             transfers = transfers[(transfers.from_store == store) | (transfers.to_store == store)]
-        report = generate_chinese_report(
-            sales, scoped(base.trends, store), local, transfers, policy.name
+        report = generate_report(
+            sales,
+            scoped(base.trends, store),
+            local.assign(product_name=local.product_name.map(product_label)),
+            transfers,
+            policy.name,
+            language=language(),
         )
         st.markdown(report)
-        st.download_button("下载经营摘要", report, "storepilot-report.md", "text/markdown")
+        st.download_button(t("下载经营摘要"), report, "storepilot-report.md", "text/markdown")
 
 
 def replenishment(data, base, rec, store, repo, scope):
@@ -227,16 +280,25 @@ def replenishment(data, base, rec, store, repo, scope):
     reviews, orders = repo.reviews(scope), repo.orders(scope)
     local = review_status(scoped(rec, store), reviews, orders)
     f1, f2, f3 = st.columns([2, 1, 1])
-    query = f1.text_input("搜索商品", placeholder="商品名或编号", key="product_search")
+    query = f1.text_input(t("搜索商品"), placeholder=t("商品名或编号"), key="product_search")
+    categories = ["全部品类"] + sorted(local.category.unique())
     category = f2.selectbox(
-        "品类", ["全部品类"] + sorted(local.category.unique()), key="category_filter"
+        t("品类"),
+        categories,
+        key="category_filter",
+        format_func=option_labels(
+            categories, lambda value: t(value) if value == "全部品类" else product_label(value)
+        ),
     )
     filter_status = f3.selectbox(
-        "处理范围", ["需要处理", "全部商品", "已处理"], key="status_filter"
+        t("处理范围"),
+        ["需要处理", "全部商品", "已处理"],
+        key="status_filter",
+        format_func=option_labels(["需要处理", "全部商品", "已处理"]),
     )
     if query:
         local = local[
-            local.product_name.str.contains(query, case=False, regex=False)
+            local.product_name.map(product_label).str.contains(query, case=False, regex=False)
             | local.sku.str.contains(query, case=False, regex=False)
         ]
     if category != "全部品类":
@@ -247,7 +309,7 @@ def replenishment(data, base, rec, store, repo, scope):
         local = local[local["确认状态"] != "待处理"]
     if local.empty:
         empty("当前筛选下没有商品。可以更换筛选条件，或前往采购页核对已确认清单。")
-        st.button("前往采购与记录", on_click=go, args=("采购与记录",))
+        st.button(t("前往采购与记录"), on_click=go, args=("采购与记录",))
         return
     table(
         local,
@@ -262,51 +324,80 @@ def replenishment(data, base, rec, store, repo, scope):
             "确认状态",
         ],
     )
-    names = {(r.store_id, r.sku): f"{r.product_name} · {r.store_id}" for r in local.itertuples()}
-    chosen = st.selectbox("选择要处理的商品", list(names), format_func=names.get, key="review_item")
+    names = {
+        (r.store_id, r.sku): f"{product_label(r.product_name)} · {r.store_id}"
+        for r in local.itertuples()
+    }
+    chosen = st.selectbox(
+        t("选择要处理的商品"), list(names), format_func=names.get, key="review_item"
+    )
     store_id, sku = chosen
     row = local[(local.store_id == store_id) & (local.sku == sku)].iloc[0]
     details, form = st.columns([1, 1.2], gap="large")
     with details, st.container(border=True):
-        st.subheader(str(row.product_name))
+        st.subheader(product_label(str(row.product_name)))
         st.write(
-            f"建议补货 **{row.suggested_order_qty} 件**，参考金额 **¥{row.purchase_cost:,.2f}**。"
+            t(
+                "建议补货 **{0} 件**，参考金额 **¥{1:,.2f}**。",
+                row.suggested_order_qty,
+                row.purchase_cost,
+            )
         )
         st.write(
-            f"当前现货 {row.on_hand:g} 件，在途 {row.on_order:g} 件；预计每天售出 {row.daily_demand:g} 件。"
+            t(
+                "当前现货 {0:g} 件，在途 {1:g} 件；预计每天售出 {2:g} 件。",
+                row.on_hand,
+                row.on_order,
+                row.daily_demand,
+            )
         )
         st.write(
-            f"交货需要 {row.lead_time_days} 天，目标库存约 {row.target_stock:g} 件，含安全余量 {row.safety_stock:g} 件。"
+            t(
+                "交货需要 {0} 天，目标库存约 {1:g} 件，含安全余量 {2:g} 件。",
+                row.lead_time_days,
+                row.target_stock,
+                row.safety_stock,
+            )
         )
         st.caption(
-            f"每箱 {row.case_pack} 件 · 起订 {row.min_order_qty} 件 · 供应商 {row.supplier_id}"
+            t(
+                "每箱 {0} 件 · 起订 {1} 件 · 供应商 {2}",
+                row.case_pack,
+                row.min_order_qty,
+                row.supplier_id,
+            )
         )
         if row.budget_adjusted:
-            st.warning("本项建议已受预算限制，仍可能存在缺货。")
+            st.warning(t("本项建议已受预算限制，仍可能存在缺货。"))
         if row.expiry_risk_units > 0:
-            st.info("库存可能超过保质期内的销量。请先核对各批次到期日，再决定促销或调拨。")
-        st.caption("在途到货日期尚未录入；请向供应商核对交货安排。")
+            st.info(t("库存可能超过保质期内的销量。请先核对各批次到期日，再决定促销或调拨。"))
+        st.caption(t("在途到货日期尚未录入；请向供应商核对交货安排。"))
     with form, st.container(border=True):
-        st.subheader("确认这项安排")
+        st.subheader(t("确认这项安排"))
         if ((orders.store_id == store_id) & (orders.supplier_id == row.supplier_id)).any():
-            st.info("该供应商的采购单已审核，可在采购与记录中下载。")
+            st.info(t("该供应商的采购单已审核，可在采购与记录中下载。"))
             return
         identity = f"{scope}:{store_id}:{sku}"
         prior = reviews[(reviews.store_id == store_id) & (reviews.sku == sku)]
         default = int(prior.iloc[0].final_qty) if not prior.empty else int(row.suggested_order_qty)
         action = st.radio(
-            "处理方式",
+            t("处理方式"),
             ["接受", "修改", "拒绝"],
             index=["接受", "修改", "拒绝"].index(prior.iloc[0].action) if not prior.empty else 0,
             horizontal=True,
             key=f"action:{identity}",
-            format_func=lambda a: {"接受": "按建议补货", "修改": "调整数量", "拒绝": "本次不采购"}[
-                a
-            ],
+            format_func={
+                key: t(label)
+                for key, label in {
+                    "接受": "按建议补货",
+                    "修改": "调整数量",
+                    "拒绝": "本次不采购",
+                }.items()
+            }.get,
         )
         with st.form(f"review:{identity}"):
             qty = st.number_input(
-                "本次补货数量",
+                t("本次补货数量"),
                 min_value=0,
                 value=default
                 if action == "修改"
@@ -329,27 +420,29 @@ def replenishment(data, base, rec, store, repo, scope):
             ]
             saved_reason = prior.iloc[0].reason if not prior.empty else ""
             reason = st.selectbox(
-                "调整原因",
+                t("调整原因"),
                 reasons,
                 index=reasons.index(saved_reason) if saved_reason in reasons else 0,
-                format_func=lambda x: x or "请选择（调整或不采购时必填）",
+                format_func=option_labels(
+                    reasons, lambda x: t(x or "请选择（调整或不采购时必填）")
+                ),
                 key=f"reason:{identity}",
             )
             note = st.text_input(
-                "补充说明",
+                t("补充说明"),
                 value=prior.iloc[0].note if not prior.empty else "",
-                placeholder="例如：周末活动取消，先少进一箱",
+                placeholder=t("例如：周末活动取消，先少进一箱"),
                 key=f"note:{identity}",
             )
-            submitted = st.form_submit_button("保存安排", type="primary", width="stretch")
+            submitted = st.form_submit_button(t("保存安排"), type="primary", width="stretch")
         if submitted:
             try:
                 repo.review(scope, row.to_dict(), action, qty, reason, note)
                 notice("已保存，采购草稿已同步更新。")
                 st.rerun()
             except ValueError as exc:
-                st.error(str(exc))
-    st.button("前往采购与记录", key="go_orders", on_click=go, args=("采购与记录",))
+                st.error(t("{0}", exc))
+    st.button(t("前往采购与记录"), key="go_orders", on_click=go, args=("采购与记录",))
 
 
 def purchases(data, base, rec, store, repo, scope, policy):
@@ -368,12 +461,12 @@ def purchases(data, base, rec, store, repo, scope, policy):
             (
                 "待审核金额",
                 f"¥{drafts.line_total.sum():,.2f}",
-                f"{len(drafts)} 条确认明细",
+                t("{0} 条确认明细", len(drafts)),
                 "primary",
             ),
             (
                 "本批次已审核",
-                f"{scoped(orders, store).order_id.nunique()} 单",
+                t("{0} 单", scoped(orders, store).order_id.nunique()),
                 "保留完整审核记录",
                 "",
             ),
@@ -388,16 +481,16 @@ def purchases(data, base, rec, store, repo, scope, policy):
         ]
     )
     if policy.max_purchase_budget is not None and all_cost > policy.max_purchase_budget:
-        st.warning(f"全部门店的确认金额 ¥{all_cost:,.2f} 已超出预算，请先回补货清单调整。")
-    draft_tab, history_tab = st.tabs(["待审核草稿", "处理记录"])
+        st.warning(t("全部门店的确认金额 ¥{0:,.2f} 已超出预算，请先回补货清单调整。", all_cost))
+    draft_tab, history_tab = st.tabs([t("待审核草稿"), t("处理记录")])
     with draft_tab:
         if drafts.empty:
             empty("还没有待审核的采购草稿。先在补货清单中确认需要采购的商品。")
-            st.button("去确认补货", key="review_from_orders", on_click=go, args=("补货清单",))
+            st.button(t("去确认补货"), key="review_from_orders", on_click=go, args=("补货清单",))
         else:
             groups = list(drafts.groupby(["store_id", "supplier_id"]).groups)
             group = st.selectbox(
-                "选择采购单", groups, format_func=lambda x: f"{x[0]} · {x[1]}", key="order_group"
+                t("选择采购单"), groups, format_func=lambda x: f"{x[0]} · {x[1]}", key="order_group"
             )
             rows = drafts[(drafts.store_id == group[0]) & (drafts.supplier_id == group[1])]
             table(
@@ -412,33 +505,33 @@ def purchases(data, base, rec, store, repo, scope, policy):
                     "reason",
                 ],
             )
-            st.write(f"本单合计 **¥{rows.line_total.sum():,.2f}**")
-            st.caption("当前调拨建议尚未扣减采购量。若决定调拨，请先调整补货清单后再审核。")
+            st.write(t("本单合计 **¥{0:,.2f}**", rows.line_total.sum()))
+            st.caption(t("当前调拨建议尚未扣减采购量。若决定调拨，请先调整补货清单后再审核。"))
             # Confirmation belongs to the exact draft the owner checked.
             approval_key = f"{scope}:{group}:{','.join(rows.reviewed_at)}"
             with st.form(f"approve_order:{approval_key}"):
                 confirmed = st.checkbox(
-                    "已核对数量、价格和供应商交货安排", key=f"confirm:{approval_key}"
+                    t("已核对数量、价格和供应商交货安排"), key=f"confirm:{approval_key}"
                 )
-                approve = st.form_submit_button("审核本单", type="primary")
+                approve = st.form_submit_button(t("审核本单"), type="primary")
             if approve:
                 if not confirmed:
-                    st.error("请先勾选核对项。")
+                    st.error(t("请先勾选核对项。"))
                 else:
                     try:
                         order_id = repo.approve(scope, *group, policy.max_purchase_budget)
-                        notice(f"采购单 {order_id} 已审核，可在处理记录中下载。")
+                        notice(t("采购单 {0} 已审核，可在处理记录中下载。", order_id))
                         st.rerun()
                     except ValueError as exc:
-                        st.error(str(exc))
+                        st.error(t("{0}", exc))
             st.download_button(
-                "导出待审核草稿",
-                download_csv(rows.rename(columns=COLUMNS)),
+                t("导出待审核草稿"),
+                download_csv(display_frame(rows)),
                 "purchase-draft.csv",
                 "text/csv",
             )
     with history_tab:
-        st.subheader("本批次已审核采购")
+        st.subheader(t("本批次已审核采购"))
         local_orders = scoped(orders, store)
         if local_orders.empty:
             empty("本批次尚无已审核采购单。")
@@ -455,12 +548,12 @@ def purchases(data, base, rec, store, repo, scope, policy):
                 ],
             )
             st.download_button(
-                "下载已审核采购单",
-                download_csv(local_orders.drop(columns="scope").rename(columns=COLUMNS)),
+                t("下载已审核采购单"),
+                download_csv(display_frame(local_orders.drop(columns="scope"))),
                 "purchase-approved.csv",
                 "text/csv",
             )
-        st.subheader("商品处理记录")
+        st.subheader(t("商品处理记录"))
         local_reviews = scoped(reviews, store)
         if not local_reviews.empty:
             table(
@@ -476,15 +569,17 @@ def purchases(data, base, rec, store, repo, scope, policy):
                 ],
             )
         else:
-            st.caption("确认或调整商品后，记录会出现在这里。")
-        with st.expander("查看历史批次采购"):
+            st.caption(t("确认或调整商品后，记录会出现在这里。"))
+        with st.expander(t("查看历史批次采购")):
             historical = scoped(repo.orders(), store)
             historical = historical[historical.scope != scope]
             table(
                 historical,
                 ["order_id", "store_id", "product_name", "final_qty", "line_total", "approved_at"],
             )
-            st.caption("导入新数据或修改策略会产生新的批次；审核前请核对历史采购，避免重复订货。")
+            st.caption(
+                t("导入新数据或修改策略会产生新的批次；审核前请核对历史采购，避免重复订货。")
+            )
 
 
 def trends(data, base, rec, store):
@@ -496,12 +591,20 @@ def trends(data, base, rec, store):
         empty("该门店暂无销售历史，导入销售记录后即可查看走势。")
         return
     f1, f2, f3 = st.columns([2, 1, 1])
-    names = data.products.set_index("sku").product_name.to_dict()
-    sku = f1.selectbox("商品", sorted(history.sku.unique()), format_func=names.get, key="trend_sku")
+    names = data.products.set_index("sku").product_name.map(product_label).to_dict()
+    sku = f1.selectbox(
+        t("商品"),
+        sorted(history.sku.unique()),
+        format_func=names.get,
+        key="trend_sku",
+    )
     stores = sorted(history[history.sku == sku].store_id.unique())
-    trend_store = f2.selectbox("对照门店", stores, key="trend_store")
+    trend_store = f2.selectbox(t("对照门店"), stores, key="trend_store")
     horizon = f3.selectbox(
-        "查看未来", [7, 14, 30], format_func=lambda d: f"{d} 天", key="trend_horizon"
+        t("查看未来"),
+        [7, 14, 30],
+        format_func=option_labels([7, 14, 30], lambda d: t("{0} 天", d)),
+        key="trend_horizon",
     )
     future = base.base_forecast[
         (base.base_forecast.sku == sku) & (base.base_forecast.store_id == trend_store)
@@ -509,8 +612,8 @@ def trends(data, base, rec, store):
     metrics(
         [
             (
-                f"未来 {d} 天",
-                f"{future.head(d).predicted_units.sum():,.0f} 件",
+                t("未来 {0} 天", d),
+                t("{0:,.0f} 件", future.head(d).predicted_units.sum()),
                 "预计需求量",
                 "primary" if d == 7 else "",
             )
@@ -522,31 +625,33 @@ def trends(data, base, rec, store):
         .sort_values("date")
         .tail(28)
     )
-    actual = actual[["date", "units"]].rename(columns={"units": "销量"}).assign(类型="实际销量")
+    actual = actual[["date", "units"]].assign(kind=t("实际销量"))
     estimate = (
-        future.head(horizon).rename(columns={"predicted_units": "销量"}).assign(类型="预计需求")
+        future.head(horizon).rename(columns={"predicted_units": "units"}).assign(kind=t("预计需求"))
     )
-    lines = pd.concat([actual, estimate[["date", "销量", "类型"]]], ignore_index=True)
+    lines = pd.concat([actual, estimate[["date", "units", "kind"]]], ignore_index=True)
     line = (
         alt.Chart(lines)
         .mark_line(strokeWidth=2.5)
         .encode(
-            x=alt.X("date:T", title="日期", axis=alt.Axis(format="%m/%d")),
-            y=alt.Y("销量:Q", title="件数", scale=alt.Scale(zero=True)),
+            x=alt.X("date:T", title=t("日期"), axis=alt.Axis(format="%m/%d")),
+            y=alt.Y("units:Q", title=t("件数"), scale=alt.Scale(zero=True)),
             color=alt.Color(
-                "类型:N",
-                scale=alt.Scale(domain=["实际销量", "预计需求"], range=["#182d4d", "#2458d3"]),
+                "kind:N",
+                scale=alt.Scale(
+                    domain=[t("实际销量"), t("预计需求")], range=["#182d4d", "#2458d3"]
+                ),
                 legend=alt.Legend(orient="top", title=None),
             ),
             strokeDash=alt.StrokeDash(
-                "类型:N",
-                scale=alt.Scale(domain=["实际销量", "预计需求"], range=[[1, 0], [5, 4]]),
+                "kind:N",
+                scale=alt.Scale(domain=[t("实际销量"), t("预计需求")], range=[[1, 0], [5, 4]]),
                 legend=None,
             ),
             tooltip=[
-                alt.Tooltip("date:T", title="日期", format="%Y-%m-%d"),
-                alt.Tooltip("销量:Q", format=".1f"),
-                "类型:N",
+                alt.Tooltip("date:T", title=t("日期"), format="%Y-%m-%d"),
+                alt.Tooltip("units:Q", title=t("件数"), format=".1f"),
+                alt.Tooltip("kind:N", title=t("类型")),
             ],
         )
     )
@@ -558,14 +663,14 @@ def trends(data, base, rec, store):
     st.altair_chart(
         (band + line).properties(height=310).configure_view(stroke=None), width="stretch"
     )
-    st.caption("浅色带为历史误差估算的需求范围，远期参考性较弱；实际销量也可能受到缺货影响。")
-    st.subheader("商品趋势对照")
+    st.caption(t("浅色带为历史误差估算的需求范围，远期参考性较弱；实际销量也可能受到缺货影响。"))
+    st.subheader(t("商品趋势对照"))
     comparison = scoped(base.trends, store).merge(data.products[["sku", "product_name"]], on="sku")
     table(
         comparison.sort_values("trend_pct", ascending=False),
         ["store_id", "product_name", "trend", "trend_pct"],
     )
-    st.caption("变化比例对比未来 7 天的预计日销量与过去 28 天的平均日需求。")
+    st.caption(t("变化比例对比未来 7 天的预计日销量与过去 28 天的平均日需求。"))
 
 
 def scenarios(data, base, rec, store, policy, scope):
@@ -576,23 +681,27 @@ def scenarios(data, base, rec, store, policy, scope):
     with st.form("scenario_form"):
         left, right = st.columns(2, gap="large")
         with left:
-            price = st.slider("售价调整（%）", -30, 30, 0, key="scenario_price")
-            promo = st.slider("额外促销需求（%）", 0, 100, 0, key="scenario_promo")
-            traffic = st.slider("客流变化（%）", -50, 100, 0, key="scenario_traffic")
+            price = st.slider(t("售价调整（%）"), -30, 30, 0, key="scenario_price")
+            promo = st.slider(t("额外促销需求（%）"), 0, 100, 0, key="scenario_promo")
+            traffic = st.slider(t("客流变化（%）"), -50, 100, 0, key="scenario_traffic")
         with right:
-            holiday = st.slider("节假日额外需求（%）", 0, 100, 0, key="scenario_holiday")
-            delay = st.slider("交货额外延迟（天）", 0, 14, 0, key="scenario_delay")
+            holiday = st.slider(t("节假日额外需求（%）"), 0, 100, 0, key="scenario_holiday")
+            delay = st.slider(t("交货额外延迟（天）"), 0, 14, 0, key="scenario_delay")
             elasticity = st.number_input(
-                "价格弹性假设",
+                t("价格弹性假设"),
                 -5.0,
                 0.0,
                 -1.2,
                 0.1,
                 key="scenario_elasticity",
-                help="例如 -1.2 表示涨价 1% 时，假设需求下降约 1.2%。此系数尚未从你的门店数据中估计。",
+                help=t(
+                    "例如 -1.2 表示涨价 1% 时，假设需求下降约 1.2%。此系数尚未从你的门店数据中估计。"
+                ),
             )
-        st.caption("同一活动带来的客流与促销影响请避免重复填写。本次测算作用于所选门店的全部商品。")
-        submitted = st.form_submit_button("比较这组方案", type="primary")
+        st.caption(
+            t("同一活动带来的客流与促销影响请避免重复填写。本次测算作用于所选门店的全部商品。")
+        )
+        submitted = st.form_submit_button(t("比较这组方案"), type="primary")
     comparison_key = f"{scope}:{store}"
     if submitted:
         scenario = ScenarioConfig(price, promo, traffic, holiday, delay, elasticity)
@@ -605,7 +714,7 @@ def scenarios(data, base, rec, store, policy, scope):
             )
             st.session_state["scenario_result"] = (comparison_key, scenario, future, result)
         except ValueError as exc:
-            st.error(str(exc))
+            st.error(t("{0}", exc))
     saved = st.session_state.get("scenario_result")
     if not saved or saved[0] != comparison_key:
         empty("设置好条件后，点击“比较这组方案”。测算结果不会修改已确认的采购安排。")
@@ -619,19 +728,19 @@ def scenarios(data, base, rec, store, policy, scope):
         [
             (
                 "未来 7 天需求",
-                f"{new.predicted_units.sum():,.0f} 件",
-                f"当前方案 {old.predicted_units.sum():,.0f} 件",
+                t("{0:,.0f} 件", new.predicted_units.sum()),
+                t("当前方案 {0:,.0f} 件", old.predicted_units.sum()),
                 "primary",
             ),
             (
                 "测算补货金额",
                 f"¥{result.purchase_cost.sum():,.0f}",
-                f"当前方案 ¥{scoped(rec, store).purchase_cost.sum():,.0f}",
+                t("当前方案 ¥{0:,.0f}", scoped(rec, store).purchase_cost.sum()),
                 "",
             ),
             (
                 "优先补货项",
-                f"{int((result.status == '高缺货风险').sum())} 项",
+                t("{0} 项", int((result.status == "高缺货风险").sum())),
                 "按测算后的交货时间判断",
                 "",
             ),
@@ -639,21 +748,29 @@ def scenarios(data, base, rec, store, policy, scope):
     )
     chart = pd.DataFrame(
         {
-            "当前需求": old.groupby("date").predicted_units.sum(),
-            "测算需求": new.groupby("date").predicted_units.sum(),
+            t("当前需求"): old.groupby("date").predicted_units.sum(),
+            t("测算需求"): new.groupby("date").predicted_units.sum(),
         }
     )
-    st.line_chart(chart, color=["#718298", "#2458d3"], height=240, y_label="预计件数")
+    st.line_chart(chart, color=["#718298", "#2458d3"], height=240, y_label=t("预计件数"))
     st.caption(
-        f"本次假设：售价 {scenario.price_change_pct:+g}%，促销 +{scenario.promotion_lift_pct:g}%，"
-        f"客流 {scenario.traffic_change_pct:+g}%，节假日 +{scenario.holiday_lift_pct:g}%，交货延迟 {scenario.supplier_delay_days} 天。"
+        t(
+            "本次假设：售价 {0:+g}%，促销 +{1:g}%，客流 {2:+g}%，节假日 +{3:g}%，交货延迟 {4} 天。",
+            scenario.price_change_pct,
+            scenario.promotion_lift_pct,
+            scenario.traffic_change_pct,
+            scenario.holiday_lift_pct,
+            scenario.supplier_delay_days,
+        )
     )
     table(result, ["store_id", "product_name", "suggested_order_qty", "purchase_cost", "status"])
     if store != "全部门店" and policy.max_purchase_budget is not None:
-        st.caption("单店测算使用完整的本批次预算；若需在门店之间分配预算，请切换到全部门店比较。")
+        st.caption(
+            t("单店测算使用完整的本批次预算；若需在门店之间分配预算，请切换到全部门店比较。")
+        )
     st.download_button(
-        "下载测算结果",
-        download_csv(result.rename(columns=COLUMNS)),
+        t("下载测算结果"),
+        download_csv(display_frame(result)),
         "scenario-plan.csv",
         "text/csv",
     )
@@ -671,12 +788,16 @@ def transfers(data, base, rec, store):
         result, ["product_name", "from_store", "to_store", "quantity", "estimated_purchase_saving"]
     )
     st.info(
-        "这里列出的是可调拨现货。请确认保质期、运费与到达时间，完成调拨后更新库存，再核对采购清单。"
+        t(
+            "这里列出的是可调拨现货。请确认保质期、运费与到达时间，完成调拨后更新库存，再核对采购清单。"
+        )
     )
-    st.caption("对应采购货值不等于净节省金额；本版尚未计算运输和人工费用，也不会自动调减采购数量。")
+    st.caption(
+        t("对应采购货值不等于净节省金额；本版尚未计算运输和人工费用，也不会自动调减采购数量。")
+    )
     st.download_button(
-        "下载调拨清单",
-        download_csv(result.rename(columns=COLUMNS)),
+        t("下载调拨清单"),
+        download_csv(display_frame(result)),
         "store-transfers.csv",
         "text/csv",
     )
@@ -684,26 +805,33 @@ def transfers(data, base, rec, store):
 
 def settings(data, base, rec, store, repo, scope, policy):
     heading("数据与设置", "更新经营数据、调整备货偏好，或查看计算依据。")
-    settings_tab, import_tab, method_tab = st.tabs(["备货偏好", "导入数据", "计算与数据说明"])
+    settings_tab, import_tab, method_tab = st.tabs(
+        [t("备货偏好"), t("导入数据"), t("计算与数据说明")]
+    )
     with settings_tab:
         with st.form("policy_form"):
             name = st.selectbox(
-                "经营偏好",
+                t("经营偏好"),
                 ["保守", "平衡", "增长"],
                 index=["保守", "平衡", "增长"].index(policy.name),
-                format_func=lambda x: {"保守": "控制库存", "平衡": "平衡备货", "增长": "备货充足"}[
-                    x
-                ],
+                format_func={
+                    key: t(label)
+                    for key, label in {
+                        "保守": "控制库存",
+                        "平衡": "平衡备货",
+                        "增长": "备货充足",
+                    }.items()
+                }.get,
                 key="policy_name",
             )
-            st.caption("控制库存会减少安全余量；备货充足会预留更多库存，并承担更高的占款压力。")
+            st.caption(t("控制库存会减少安全余量；备货充足会预留更多库存，并承担更高的占款压力。"))
             enabled = st.checkbox(
-                "设置本批次采购预算",
+                t("设置本批次采购预算"),
                 value=policy.max_purchase_budget is not None,
                 key="policy_budget_enabled",
             )
             amount = st.number_input(
-                "全部门店合计预算（元）",
+                t("全部门店合计预算（元）"),
                 0.0,
                 1_000_000.0,
                 float(
@@ -714,7 +842,7 @@ def settings(data, base, rec, store, repo, scope, policy):
             )
             preset = StrategyConfig.preset(policy.name)
             custom = st.checkbox(
-                "自定义安全余量",
+                t("自定义安全余量"),
                 value=(
                     policy.safety_days != preset.safety_days
                     or policy.service_level != preset.service_level
@@ -722,18 +850,18 @@ def settings(data, base, rec, store, repo, scope, policy):
                 key="policy_custom",
             )
             safety = st.number_input(
-                "额外安全库存天数", 0.0, 7.0, float(policy.safety_days), 0.5, key="policy_safety"
+                t("额外安全库存天数"), 0.0, 7.0, float(policy.safety_days), 0.5, key="policy_safety"
             )
             service = st.slider(
-                "目标备货服务水平（%）",
+                t("目标备货服务水平（%）"),
                 75,
                 99,
                 int(policy.service_level * 100),
                 key="policy_service",
-                help="用于估算安全库存的目标，不是实际服务水平的保证。",
+                help=t("用于估算安全库存的目标，不是实际服务水平的保证。"),
             )
-            st.caption("保存后会重新计算建议并建立新的审核批次，已有采购记录会保留。")
-            save = st.form_submit_button("保存备货偏好", type="primary")
+            st.caption(t("保存后会重新计算建议并建立新的审核批次，已有采购记录会保留。"))
+            save = st.form_submit_button(t("保存备货偏好"), type="primary")
         if save:
             new_policy = StrategyConfig.preset(name, amount if enabled else None)
             if custom:
@@ -741,32 +869,36 @@ def settings(data, base, rec, store, repo, scope, policy):
             try:
                 selected_plan(data, base, new_policy)
             except ValueError as exc:
-                st.error(f"未保存：{exc}")
+                st.error(t("未保存：{0}", exc))
             else:
                 st.session_state["policy"] = new_policy
                 notice("备货偏好已保存，补货建议已更新。")
                 st.rerun()
     with import_tab:
         st.info(
-            "演示与示例文件仅包含非食品日用品：家居清洁、衣物清洁、个人护理和纸品。上传文件保留你自己的商品与品类。"
+            t(
+                "演示与示例文件仅包含非食品日用品：家居清洁、衣物清洁、个人护理和纸品。上传文件保留你自己的商品与品类。"
+            )
         )
-        st.write("每次导入一组完整的销售、商品和库存文件。建议准备至少 70 天的每日销量。")
+        st.write(t("每次导入一组完整的销售、商品和库存文件。建议准备至少 70 天的每日销量。"))
         with st.form("import_form"):
-            sales_file = st.file_uploader("每日销售 · sales.csv", type=["csv"], key="upload_sales")
+            sales_file = st.file_uploader(
+                t("每日销售 · sales.csv"), type=["csv"], key="upload_sales"
+            )
             products_file = st.file_uploader(
-                "商品资料 · products.csv", type=["csv"], key="upload_products"
+                t("商品资料 · products.csv"), type=["csv"], key="upload_products"
             )
             inventory_file = st.file_uploader(
-                "当前库存 · inventory.csv", type=["csv"], key="upload_inventory"
+                t("当前库存 · inventory.csv"), type=["csv"], key="upload_inventory"
             )
-            load = st.form_submit_button("检查并使用这组数据", type="primary")
+            load = st.form_submit_button(t("检查并使用这组数据"), type="primary")
         if load:
             if any(f is None for f in (sales_file, products_file, inventory_file)):
-                st.error("请同时选择销售、商品和库存三份文件。")
+                st.error(t("请同时选择销售、商品和库存三份文件。"))
             elif (
                 sum(f.size for f in (sales_file, products_file, inventory_file)) > 25 * 1024 * 1024
             ):
-                st.error("当前版本每批导入上限为 25 MB。请先按日汇总或减少历史范围。")
+                st.error(t("当前版本每批导入上限为 25 MB。请先按日汇总或减少历史范围。"))
             else:
                 try:
                     frames = [
@@ -777,7 +909,7 @@ def settings(data, base, rec, store, repo, scope, policy):
                         for f in (sales_file, products_file, inventory_file)
                     ]
                     checked = validate_data(RetailData(*frames))
-                    with st.spinner("正在检查记录并计算需求…"):
+                    with st.spinner(t("正在检查记录并计算需求…")):
                         checked_base = analyse(checked)
                         selected_plan(checked, checked_base, policy)
                     st.session_state["active_data"] = checked
@@ -791,28 +923,38 @@ def settings(data, base, rec, store, repo, scope, policy):
                     pd.errors.ParserError,
                     pd.errors.EmptyDataError,
                 ) as exc:
-                    st.error(f"未导入：{exc}")
-        if st.button("切换到演示数据", key="reset_sample"):
+                    st.error(t("未导入：{0}", exc))
+        if st.button(t("切换到演示数据"), key="reset_sample"):
             st.session_state["active_data"] = sample_data()
             st.session_state["source"] = "演示数据"
             st.session_state["pending_store_reset"] = True
             notice("已切换到演示数据。")
             st.rerun()
-        with st.expander("下载示例文件，查看字段格式"):
+        with st.expander(t("下载示例文件，查看字段格式")):
             demo = sample_data()
+            example_products = demo.products.copy()
+            for column in ["product_name", "category"]:
+                example_products[column] = example_products[column].map(
+                    lambda value: demo_label(value, language())
+                )
             for title, frame in [
                 ("sales", demo.sales),
-                ("products", demo.products),
+                ("products", example_products),
                 ("inventory", demo.inventory),
             ]:
                 st.download_button(
-                    f"下载 {title}.csv", download_csv(frame), f"{title}.csv", "text/csv"
+                    t("下载 {0}.csv", title), download_csv(frame), f"{title}.csv", "text/csv"
                 )
-            st.caption("示例中的销量与库存为模拟数据。编号按文本读取，可保留前导零。")
+            st.caption(t("示例中的销量与库存为模拟数据。编号按文本读取，可保留前导零。"))
     with method_tab:
         st.write(
-            f"当前数据：{data.sales.date.min():%Y-%m-%d} 至 {data.sales.date.max():%Y-%m-%d}，"
-            f"共 {len(data.sales):,} 条日销量记录、{data.inventory.store_id.nunique()} 家门店。"
+            t(
+                "当前数据：{0:%Y-%m-%d} 至 {1:%Y-%m-%d}，共 {2:,} 条日销量记录、{3} 家门店。",
+                data.sales.date.min(),
+                data.sales.date.max(),
+                len(data.sales),
+                data.inventory.store_id.nunique(),
+            )
         )
         unmatched = data.inventory.merge(
             data.sales[["store_id", "sku"]].drop_duplicates(),
@@ -822,18 +964,24 @@ def settings(data, base, rec, store, repo, scope, policy):
         )
         unmatched = unmatched[unmatched._merge == "left_only"]
         if not unmatched.empty:
-            st.warning(f"有 {len(unmatched)} 项门店商品没有销售历史，暂未给出补货建议。")
+            st.warning(t("有 {0} 项门店商品没有销售历史，暂未给出补货建议。", len(unmatched)))
             table(unmatched, ["store_id", "sku", "on_hand"])
         st.write(
-            "需求预测使用梯度提升回归，参考近期销量、每周规律与历史价格。新销量导入后重新拟合；浏览页面和调整情景不会重复训练。"
+            t(
+                "需求预测使用梯度提升回归，参考近期销量、每周规律与历史价格。新销量导入后重新拟合；浏览页面和调整情景不会重复训练。"
+            )
         )
         st.write(
-            "店主反馈用于保留经营判断与采购安排，当前不会直接用反馈文字修改预测模型。补货采用目标库存与预算优先分配规则。"
+            t(
+                "店主反馈用于保留经营判断与采购安排，当前不会直接用反馈文字修改预测模型。补货采用目标库存与预算优先分配规则。"
+            )
         )
         st.write(
-            "库存文件没有批次到期日和预计到货日，因此临期提示仅用于提醒核查；无法据此判断某一批货是否已经临期。"
+            t(
+                "库存文件没有批次到期日和预计到货日，因此临期提示仅用于提醒核查；无法据此判断某一批货是否已经临期。"
+            )
         )
-        with st.expander("查看预测验证指标"):
+        with st.expander(t("查看预测验证指标")):
             m = base.metrics
             table(
                 pd.DataFrame(
@@ -845,7 +993,7 @@ def settings(data, base, rec, store, repo, scope, policy):
                             "校验样本数",
                         ],
                         "数值": [
-                            f"{m.mae:.2f} 件",
+                            t("{0:.2f} 件", m.mae),
                             f"{m.wape:.1%}",
                             f"{m.interval_coverage:.1%}",
                             str(m.validation_rows),
@@ -854,14 +1002,18 @@ def settings(data, base, rec, store, repo, scope, policy):
                 )
             )
             st.caption(
-                "按日期留出历史记录做逐日验证。覆盖比例来自同一误差校准样本，不代表未来 30 天的独立验证表现。"
+                t(
+                    "按日期留出历史记录做逐日验证。覆盖比例来自同一误差校准样本，不代表未来 30 天的独立验证表现。"
+                )
             )
-        st.caption("当前版本适合单店主本地使用。已审核表示本地留档，未与供应商系统连接。")
+        st.caption(t("当前版本适合单店主本地使用。已审核表示本地留档，未与供应商系统连接。"))
 
 
 def main():
+    if "language" not in st.session_state:
+        st.session_state["language"] = "zh"
     st.set_page_config(
-        page_title="StorePilot · 门店工作台", layout="wide", initial_sidebar_state="expanded"
+        page_title=t("StorePilot · 门店工作台"), layout="wide", initial_sidebar_state="expanded"
     )
     style = files("storepilot").joinpath("assets/workbench.css").read_text(encoding="utf-8")
     st.html(f"<style>{style}</style>")
@@ -883,21 +1035,42 @@ def main():
     if st.session_state.pop("pending_store_reset", False):
         st.session_state["store_scope"] = "全部门店"
     with st.sidebar:
+        st.radio(
+            "Language / 语言",
+            ["zh", "en"],
+            format_func={"zh": "中文", "en": "English"}.get,
+            key="language",
+            horizontal=True,
+        )
         st.markdown(
-            '<div class="sp-brand">StorePilot</div><div class="sp-brand-sub">门店经营工作台</div>',
+            f'<div class="sp-brand">StorePilot</div><div class="sp-brand-sub">{escape(t("门店经营工作台"))}</div>',
             unsafe_allow_html=True,
         )
         stores = ["全部门店"] + sorted(data.inventory.store_id.unique())
         if st.session_state.get("store_scope") not in stores:
             st.session_state["store_scope"] = "全部门店"
-        store = st.selectbox("当前门店", stores, key="store_scope")
-        page = st.radio("工作台导航", PAGES, key="nav", label_visibility="collapsed")
+        store = st.selectbox(
+            t("当前门店"),
+            stores,
+            key="store_scope",
+            format_func=option_labels(
+                stores, lambda value: t(value) if value == "全部门店" else value
+            ),
+        )
+        page = st.radio(
+            t("工作台导航"),
+            PAGES,
+            key="nav",
+            format_func=option_labels(PAGES),
+            label_visibility="collapsed",
+        )
         st.divider()
-        st.caption(f"{source} · 销售截至 {data.sales.date.max():%m月%d日}")
-        st.caption("更改数据与备货偏好，请前往数据与设置。")
+        st.caption(t("{0} · 销售截至 {1:%m月%d日}", t(source), data.sales.date.max()))
+        st.caption(t("更改数据与备货偏好，请前往数据与设置。"))
     st.markdown(
-        f'<div class="sp-top"><span class="sp-badge">{escape(source)}</span>'
-        f"<span>{escape(store)}</span><span>销售截至 {data.sales.date.max():%Y-%m-%d}</span></div>",
+        f'<div class="sp-top"><span class="sp-badge">{escape(t(source))}</span>'
+        f"<span>{escape(t(store) if store == '全部门店' else store)}</span>"
+        f"<span>{escape(t('销售截至 {0:%Y-%m-%d}', data.sales.date.max()))}</span></div>",
         unsafe_allow_html=True,
     )
     message = st.session_state.pop("notice", None)
@@ -905,9 +1078,9 @@ def main():
         st.success(message)
     age = (pd.Timestamp(datetime.now(UTC).date()) - data.sales.date.max()).days
     if age > 2:
-        st.warning(f"销售数据已 {age} 天未更新。建议先导入最新记录，再确认采购。")
+        st.warning(t("销售数据已 {0} 天未更新。建议先导入最新记录，再确认采购。", age))
     try:
-        with st.spinner("正在整理销售与库存…"):
+        with st.spinner(t("正在整理销售与库存…")):
             base = analyse(data)
             rec = selected_plan(data, base, policy)
         data_id = dataset_key(data, source)
@@ -935,5 +1108,5 @@ def main():
         else:
             settings(data, base, rec, store, repo, scope, policy)
     except (ValueError, sqlite3.Error, OSError) as exc:
-        st.error(f"暂时无法完成操作：{exc}")
-        st.caption("请检查数据和本地文件的读写权限后重试。")
+        st.error(t("暂时无法完成操作：{0}", exc))
+        st.caption(t("请检查数据和本地文件的读写权限后重试。"))

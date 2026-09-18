@@ -6,6 +6,8 @@ All notable changes to StorePilot are recorded in this file.
 
 - Replace food and drink demo products with non-food household essentials in the
   dashboard and downloadable import examples; keep uploaded catalogs unchanged.
+- Add a Chinese/English sidebar selector for the interface, reports, and exports.
+  Switching language preserves store selections, purchasing preferences, and reviews.
 
 ## 0.2.0 — 2026-09-05
 
