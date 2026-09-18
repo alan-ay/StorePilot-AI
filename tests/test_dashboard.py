@@ -243,6 +243,30 @@ class DashboardTests(unittest.TestCase):
         self.assertTrue(self.app.session_state["active_data"].inventory.equals(data.inventory))
         self.visit("今日概览")
 
+    def test_demo_catalog_refresh_does_not_replace_imported_data(self):
+        from storepilot.data import DEMO_CATALOG_VERSION
+
+        data = self.app.session_state["active_data"]
+        data.products.loc[0, "product_name"] = "旧演示食品"
+        self.app.session_state["demo_catalog_version"] = "old"
+        self.app.run()
+        self.assertNoFailure()
+        self.assertEqual(self.app.session_state["demo_catalog_version"], DEMO_CATALOG_VERSION)
+        self.assertNotIn(
+            "旧演示食品", self.app.session_state["active_data"].products.product_name.tolist()
+        )
+
+        data = self.app.session_state["active_data"]
+        data.products.loc[0, "product_name"] = "My imported product"
+        self.app.session_state["source"] = "门店数据"
+        self.app.session_state["demo_catalog_version"] = "old"
+        self.app.run()
+        self.assertNoFailure()
+        self.assertIn(
+            "My imported product",
+            self.app.session_state["active_data"].products.product_name.tolist(),
+        )
+
 
 def tearDownModule():
     # AppTest owns a module-level temporary directory; close it before warning-strict exit.

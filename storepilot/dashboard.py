@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from .config import ScenarioConfig, StrategyConfig
-from .data import RetailData, generate_demo_data, validate_data
+from .data import DEMO_CATALOG_VERSION, RetailData, generate_demo_data, validate_data
 from .optimization import InventoryOptimizer
 from .pipeline import StorePilotPipeline
 from .reporting import generate_chinese_report
@@ -113,7 +113,8 @@ def analyse(data):
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def sample_data():
+def sample_data(catalog_version=DEMO_CATALOG_VERSION):
+    """Include the catalog version in the cache key when demo products change."""
     return generate_demo_data()
 
 
@@ -746,6 +747,9 @@ def settings(data, base, rec, store, repo, scope, policy):
                 notice("备货偏好已保存，补货建议已更新。")
                 st.rerun()
     with import_tab:
+        st.info(
+            "演示与示例文件仅包含非食品日用品：家居清洁、衣物清洁、个人护理和纸品。上传文件保留你自己的商品与品类。"
+        )
         st.write("每次导入一组完整的销售、商品和库存文件。建议准备至少 70 天的每日销量。")
         with st.form("import_form"):
             sales_file = st.file_uploader("每日销售 · sales.csv", type=["csv"], key="upload_sales")
@@ -861,9 +865,14 @@ def main():
     )
     style = files("storepilot").joinpath("assets/workbench.css").read_text(encoding="utf-8")
     st.html(f"<style>{style}</style>")
-    if "active_data" not in st.session_state:
+    if "active_data" not in st.session_state or (
+        st.session_state.get("source") == "演示数据"
+        and st.session_state.get("demo_catalog_version") != DEMO_CATALOG_VERSION
+    ):
         st.session_state["active_data"] = sample_data()
         st.session_state["source"] = "演示数据"
+        st.session_state["demo_catalog_version"] = DEMO_CATALOG_VERSION
+        st.session_state["pending_store_reset"] = True
     if "policy" not in st.session_state:
         st.session_state["policy"] = StrategyConfig.preset("平衡")
     data, source, policy = (

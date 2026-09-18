@@ -2,6 +2,11 @@
 
 All notable changes to StorePilot are recorded in this file.
 
+## Unreleased
+
+- Replace food and drink demo products with non-food household essentials in the
+  dashboard and downloadable import examples; keep uploaded catalogs unchanged.
+
 ## 0.2.0 — 2026-09-05
 
 - Replaced the tab-heavy dashboard with a store-scoped daily workbench.

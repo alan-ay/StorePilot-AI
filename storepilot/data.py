@@ -16,6 +16,7 @@ PRODUCT_REQUIRED = {
     "price",
 }
 INVENTORY_REQUIRED = {"store_id", "sku", "on_hand"}
+DEMO_CATALOG_VERSION = "household-v1"
 
 
 @dataclass
@@ -105,18 +106,18 @@ def validate_data(data: RetailData) -> RetailData:
 
 
 def generate_demo_data(days: int = 140, seed: int = 42, end_date: date | None = None) -> RetailData:
-    """Create reproducible two-store data with trends, seasonality and stockouts."""
+    """Create reproducible non-food household retail data for two stores."""
 
     rng = np.random.default_rng(seed)
     product_rows = [
-        ("SKU001", "矿泉水 550ml", "饮料", "SUP-A", 1.0, 2.2, 540, 2, 24, 24, 18, 0.30),
-        ("SKU002", "鲜牛奶 1L", "乳制品", "SUP-B", 7.0, 11.5, 10, 1, 6, 6, 9, 0.05),
-        ("SKU003", "方便面", "食品", "SUP-C", 2.6, 5.0, 240, 3, 12, 12, 12, 0.08),
-        ("SKU004", "鸡蛋 10枚", "生鲜", "SUP-B", 7.8, 12.8, 20, 1, 6, 6, 11, 0.04),
-        ("SKU005", "薯片", "零食", "SUP-C", 3.2, 7.0, 180, 3, 12, 12, 7, -0.02),
-        ("SKU006", "纸巾 3包装", "日用品", "SUP-D", 8.0, 14.9, 730, 4, 8, 8, 5, 0.02),
-        ("SKU007", "冰淇淋", "冷冻食品", "SUP-E", 3.8, 8.0, 120, 2, 20, 20, 8, 0.18),
-        ("SKU008", "苹果 1kg", "生鲜", "SUP-F", 6.5, 12.0, 14, 1, 5, 5, 10, -0.03),
+        ("SKU001", "洗碗海绵 2片装", "家居清洁", "SUP-A", 1.0, 2.2, 1825, 2, 24, 24, 18, 0.30),
+        ("SKU002", "洗洁精 500ml", "家居清洁", "SUP-B", 7.0, 11.5, 730, 1, 6, 6, 9, 0.05),
+        ("SKU003", "洗衣皂 200g", "衣物清洁", "SUP-C", 2.6, 5.0, 1095, 3, 12, 12, 12, 0.08),
+        ("SKU004", "洗手液 500ml", "个人护理", "SUP-B", 7.8, 12.8, 730, 1, 6, 6, 11, 0.04),
+        ("SKU005", "牙刷", "个人护理", "SUP-C", 3.2, 7.0, 1825, 3, 12, 12, 7, -0.02),
+        ("SKU006", "纸巾 3包装", "纸品", "SUP-D", 8.0, 14.9, 730, 4, 8, 8, 5, 0.02),
+        ("SKU007", "垃圾袋 20只装", "家居清洁", "SUP-E", 3.8, 8.0, 1825, 2, 20, 20, 8, 0.18),
+        ("SKU008", "厨房纸 2卷装", "纸品", "SUP-F", 6.5, 12.0, 1095, 1, 5, 5, 10, -0.03),
     ]
     columns = [
         "sku",

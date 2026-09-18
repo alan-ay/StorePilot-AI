@@ -54,8 +54,13 @@ streamlit run app.py
 ```
 
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
-The app opens with labelled sample data from two stores. Import your own files
-through **数据与设置 → 导入数据**. No external model service or API key is needed.
+The app opens with labelled sample data from two stores. The demo and downloadable
+CSV examples contain non-food household essentials: cleaning products, laundry
+supplies, toiletries, and paper goods. Uploaded product names and categories are
+preserved; uploads are not restricted to this sample catalog.
+
+Import your own files through **数据与设置 → 导入数据**. No external model service
+or API key is needed.
 
 ## Input data
 
