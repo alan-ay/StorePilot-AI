@@ -51,7 +51,6 @@ class DashboardTests(unittest.TestCase):
                 "采购与记录",
                 "销售走势",
                 "情景测算",
-                "门店调拨",
                 "数据与设置",
                 "今日概览",
             ]:
@@ -63,13 +62,14 @@ class DashboardTests(unittest.TestCase):
         self.assertNoFailure()
         self.assertTrue(any("当前筛选下没有商品" in x.value for x in self.app.markdown))
         self.app.text_input(key="product_search").set_value("").run()
-        self.app.selectbox(key="store_scope").set_value("STORE-01").run()
+        self.assertEqual(self.app.selectbox(key="store_scope").value, "STORE-01")
         self.assertNoFailure()
         frame = self.app.dataframe[0].value
         self.assertTrue((frame["门店"] == "STORE-01").all())
 
     def test_review_to_approval_and_repeat(self):
         self.visit("补货清单")
+        self.app.selectbox(key="status_filter").set_value("全部商品").run()
         self.app.selectbox(key="review_item").set_value(("STORE-01", "SKU001")).run()
         action = next(r for r in self.app.radio if r.key.startswith("action:"))
         action.set_value("修改").run()
@@ -103,7 +103,7 @@ class DashboardTests(unittest.TestCase):
         self.assertTrue(FeedbackRepository(self.database.with_name("test-demo.db")).orders().empty)
 
     def test_policy_and_reset_from_single_store(self):
-        self.app.selectbox(key="store_scope").set_value("STORE-01").run()
+        self.assertEqual(self.app.selectbox(key="store_scope").value, "STORE-01")
         self.visit("数据与设置")
         self.app.selectbox(key="policy_name").set_value("保守")
         self.app.checkbox(key="policy_budget_enabled").check()
@@ -113,7 +113,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.app.session_state["policy"].max_purchase_budget, 1000)
         self.app.button(key="reset_sample").click().run()
         self.assertNoFailure()
-        self.assertEqual(self.app.selectbox(key="store_scope").value, "全部门店")
+        self.assertEqual(self.app.selectbox(key="store_scope").value, "STORE-01")
 
     def test_incomplete_import_keeps_current_data(self):
         self.visit("数据与设置")
@@ -124,6 +124,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_saved_review_is_restored_after_navigation(self):
         self.visit("补货清单")
+        self.app.selectbox(key="status_filter").set_value("全部商品").run()
         self.app.selectbox(key="review_item").set_value(("STORE-01", "SKU001")).run()
         next(r for r in self.app.radio if r.key.startswith("action:")).set_value("修改").run()
         next(n for n in self.app.number_input if n.key.startswith("qty:")).set_value(24)
@@ -267,6 +268,72 @@ class DashboardTests(unittest.TestCase):
             self.app.session_state["active_data"].products.product_name.tolist(),
         )
 
+    def test_demo_has_one_store_and_no_transfers_page(self):
+        self.assertEqual(self.app.selectbox(key="store_scope").options, ["STORE-01"])
+        self.assertTrue(self.app.selectbox(key="store_scope").disabled)
+        self.assertNotIn("门店调拨", self.app.radio(key="nav").options)
+        self.visit("销售走势")
+        self.assertEqual(self.app.selectbox(key="trend_store").options, ["STORE-01"])
+
+    def test_previous_two_store_demo_is_merged_and_stale_navigation_is_reset(self):
+        import pandas as pd
+
+        from storepilot.data import DEMO_CATALOG_VERSION
+
+        data = self.app.session_state["active_data"]
+        old_data = RetailData(
+            pd.concat([data.sales, data.sales.assign(store_id="STORE-02")], ignore_index=True),
+            data.products,
+            pd.concat(
+                [data.inventory, data.inventory.assign(store_id="STORE-02")], ignore_index=True
+            ),
+        )
+        self.app = AppTest.from_file(str(APP), default_timeout=90)
+        self.app.session_state["active_data"] = old_data
+        self.app.session_state["source"] = "演示数据"
+        self.app.session_state["demo_catalog_version"] = "household-v1"
+        self.app.session_state["store_scope"] = "STORE-02"
+        self.app.session_state["trend_store"] = "STORE-02"
+        self.app.session_state["nav"] = "门店调拨"
+        self.app.run()
+        self.assertNoFailure()
+        merged = self.app.session_state["active_data"]
+        self.assertEqual(merged.sales.units.sum(), old_data.sales.units.sum())
+        self.assertEqual(merged.inventory.on_hand.sum(), old_data.inventory.on_hand.sum())
+        self.assertAlmostEqual(
+            (merged.sales.units * merged.sales.price).sum(),
+            (old_data.sales.units * old_data.sales.price).sum(),
+        )
+        self.assertEqual(self.app.session_state["demo_catalog_version"], DEMO_CATALOG_VERSION)
+        self.assertEqual(self.app.selectbox(key="store_scope").value, "STORE-01")
+        self.assertEqual(self.app.radio(key="nav").value, "今日概览")
+        self.visit("销售走势")
+        self.assertEqual(self.app.selectbox(key="trend_store").value, "STORE-01")
+
+    def test_imported_stores_are_kept_separate(self):
+        import pandas as pd
+
+        data = self.app.session_state["active_data"]
+        imported = RetailData(
+            pd.concat([data.sales, data.sales.assign(store_id="STORE-02")], ignore_index=True),
+            data.products,
+            pd.concat(
+                [data.inventory, data.inventory.assign(store_id="STORE-02")], ignore_index=True
+            ),
+        )
+        self.app.session_state["active_data"] = imported
+        self.app.session_state["source"] = "门店数据"
+        self.app.session_state["demo_catalog_version"] = "household-v1"
+        self.app.run()
+        self.assertNoFailure()
+        self.assertEqual(
+            self.app.selectbox(key="store_scope").options, ["全部门店", "STORE-01", "STORE-02"]
+        )
+        pd.testing.assert_frame_equal(self.app.session_state["active_data"].sales, imported.sales)
+        for lang in ["zh", "en"]:
+            self.app.radio(key="language").set_value(lang).run()
+            self.visit("门店调拨")
+
     def test_english_pages_translate_visible_content(self):
         self.app.radio(key="language").set_value("en").run()
         self.assertEqual(self.app.radio(key="nav").options[0], "Overview")
@@ -280,7 +347,6 @@ class DashboardTests(unittest.TestCase):
                 "采购与记录",
                 "销售走势",
                 "情景测算",
-                "门店调拨",
                 "数据与设置",
             ]:
                 self.visit(page)
@@ -314,7 +380,7 @@ class DashboardTests(unittest.TestCase):
         from storepilot.workbench import dataset_key, decision_scope
 
         self.visit("补货清单")
-        self.app.selectbox(key="store_scope").set_value("STORE-01").run()
+        self.app.selectbox(key="status_filter").set_value("全部商品").run()
         self.app.selectbox(key="review_item").set_value(("STORE-01", "SKU001")).run()
         next(r for r in self.app.radio if r.key.startswith("action:")).set_value("修改").run()
         next(n for n in self.app.number_input if n.key.startswith("qty:")).set_value(24)
@@ -356,6 +422,8 @@ class DashboardTests(unittest.TestCase):
             and call.args[2] in {"sales.csv", "products.csv", "inventory.csv"}
         }
         self.assertEqual(set(examples), {"sales.csv", "products.csv", "inventory.csv"})
+        for name in ["sales.csv", "inventory.csv"]:
+            self.assertEqual(set(examples[name].store_id), {"STORE-01"})
         self.assertIn(
             "Dishwashing sponges (2 pack)", examples["products.csv"].product_name.tolist()
         )

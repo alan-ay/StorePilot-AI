@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from .config import ScenarioConfig, StrategyConfig
-from .data import DEMO_CATALOG_VERSION, RetailData, generate_demo_data, validate_data
+from .data import DEMO_CATALOG_VERSION, RetailData, generate_demo_data, merge_stores, validate_data
 from .i18n import ValidationError, demo_label, translate
 from .optimization import InventoryOptimizer
 from .pipeline import StorePilotPipeline
@@ -151,7 +151,7 @@ def analyse(data):
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def sample_data(catalog_version=DEMO_CATALOG_VERSION):
-    """Include the catalog version in the cache key when demo products change."""
+    """Include the demo version in the cache key when products or stores change."""
     return generate_demo_data()
 
 
@@ -475,13 +475,13 @@ def purchases(data, base, rec, store, repo, scope, policy):
                 f"¥{policy.max_purchase_budget:,.0f}"
                 if policy.max_purchase_budget is not None
                 else "未设置",
-                "预算按本批次全部门店合计",
+                "预算按本批次合计",
                 "",
             ),
         ]
     )
     if policy.max_purchase_budget is not None and all_cost > policy.max_purchase_budget:
-        st.warning(t("全部门店的确认金额 ¥{0:,.2f} 已超出预算，请先回补货清单调整。", all_cost))
+        st.warning(t("本批次的确认金额 ¥{0:,.2f} 已超出预算，请先回补货清单调整。", all_cost))
     draft_tab, history_tab = st.tabs([t("待审核草稿"), t("处理记录")])
     with draft_tab:
         if drafts.empty:
@@ -506,7 +506,8 @@ def purchases(data, base, rec, store, repo, scope, policy):
                 ],
             )
             st.write(t("本单合计 **¥{0:,.2f}**", rows.line_total.sum()))
-            st.caption(t("当前调拨建议尚未扣减采购量。若决定调拨，请先调整补货清单后再审核。"))
+            if data.inventory.store_id.nunique() > 1:
+                st.caption(t("当前调拨建议尚未扣减采购量。若决定调拨，请先调整补货清单后再审核。"))
             # Confirmation belongs to the exact draft the owner checked.
             approval_key = f"{scope}:{group}:{','.join(rows.reviewed_at)}"
             with st.form(f"approve_order:{approval_key}"):
@@ -599,7 +600,9 @@ def trends(data, base, rec, store):
         key="trend_sku",
     )
     stores = sorted(history[history.sku == sku].store_id.unique())
-    trend_store = f2.selectbox(t("对照门店"), stores, key="trend_store")
+    if st.session_state.get("trend_store") not in stores:
+        st.session_state["trend_store"] = stores[0]
+    trend_store = f2.selectbox(t("对照门店"), stores, key="trend_store", disabled=len(stores) == 1)
     horizon = f3.selectbox(
         t("查看未来"),
         [7, 14, 30],
@@ -764,7 +767,11 @@ def scenarios(data, base, rec, store, policy, scope):
         )
     )
     table(result, ["store_id", "product_name", "suggested_order_qty", "purchase_cost", "status"])
-    if store != "全部门店" and policy.max_purchase_budget is not None:
+    if (
+        data.inventory.store_id.nunique() > 1
+        and store != "全部门店"
+        and policy.max_purchase_budget is not None
+    ):
         st.caption(
             t("单店测算使用完整的本批次预算；若需在门店之间分配预算，请切换到全部门店比较。")
         )
@@ -831,7 +838,7 @@ def settings(data, base, rec, store, repo, scope, policy):
                 key="policy_budget_enabled",
             )
             amount = st.number_input(
-                t("全部门店合计预算（元）"),
+                t("本批次采购预算（元）"),
                 0.0,
                 1_000_000.0,
                 float(
@@ -1021,7 +1028,16 @@ def main():
         st.session_state.get("source") == "演示数据"
         and st.session_state.get("demo_catalog_version") != DEMO_CATALOG_VERSION
     ):
-        st.session_state["active_data"] = sample_data()
+        if (
+            "active_data" in st.session_state
+            and st.session_state.get("source") == "演示数据"
+            and st.session_state.get("demo_catalog_version") == "household-v1"
+        ):
+            st.session_state["active_data"] = merge_stores(
+                st.session_state["active_data"], "STORE-01"
+            )
+        else:
+            st.session_state["active_data"] = sample_data()
         st.session_state["source"] = "演示数据"
         st.session_state["demo_catalog_version"] = DEMO_CATALOG_VERSION
         st.session_state["pending_store_reset"] = True
@@ -1032,8 +1048,15 @@ def main():
         st.session_state["source"],
         st.session_state["policy"],
     )
+    store_ids = sorted(data.inventory.store_id.unique())
+    stores = ["全部门店", *store_ids] if len(store_ids) > 1 else store_ids
+    pages = [page for page in PAGES if len(store_ids) > 1 or page != "门店调拨"]
     if st.session_state.pop("pending_store_reset", False):
-        st.session_state["store_scope"] = "全部门店"
+        st.session_state["store_scope"] = stores[0]
+    if st.session_state.get("store_scope") not in stores:
+        st.session_state["store_scope"] = stores[0]
+    if st.session_state.get("nav") not in pages:
+        st.session_state["nav"] = pages[0]
     with st.sidebar:
         st.radio(
             "Language / 语言",
@@ -1046,22 +1069,20 @@ def main():
             f'<div class="sp-brand">StorePilot</div><div class="sp-brand-sub">{escape(t("门店经营工作台"))}</div>',
             unsafe_allow_html=True,
         )
-        stores = ["全部门店"] + sorted(data.inventory.store_id.unique())
-        if st.session_state.get("store_scope") not in stores:
-            st.session_state["store_scope"] = "全部门店"
         store = st.selectbox(
             t("当前门店"),
             stores,
             key="store_scope",
+            disabled=len(store_ids) == 1,
             format_func=option_labels(
                 stores, lambda value: t(value) if value == "全部门店" else value
             ),
         )
         page = st.radio(
             t("工作台导航"),
-            PAGES,
+            pages,
             key="nav",
-            format_func=option_labels(PAGES),
+            format_func=option_labels(pages),
             label_visibility="collapsed",
         )
         st.divider()

@@ -18,7 +18,7 @@ PRODUCT_REQUIRED = {
     "price",
 }
 INVENTORY_REQUIRED = {"store_id", "sku", "on_hand"}
-DEMO_CATALOG_VERSION = "household-v1"
+DEMO_CATALOG_VERSION = "household-single-store-v2"
 
 
 @dataclass
@@ -107,8 +107,33 @@ def validate_data(data: RetailData) -> RetailData:
     )
 
 
+def merge_stores(data: RetailData, store_id: str) -> RetailData:
+    """Combine stores, preserving quantities and sales revenue for each SKU/day."""
+    data = validate_data(data)
+    sales = (
+        data.sales.assign(revenue=data.sales.units * data.sales.price)
+        .groupby(["date", "sku"], as_index=False)
+        .agg(
+            units=("units", "sum"),
+            revenue=("revenue", "sum"),
+            price=("price", "mean"),
+            promotion=("promotion", "max"),
+            stockout=("stockout", "max"),
+        )
+    )
+    # Use the mean listed price when no units sold; otherwise preserve revenue.
+    sales["price"] = (sales.revenue / sales.units.where(sales.units > 0)).fillna(sales.price)
+    sales = sales.drop(columns="revenue").assign(store_id=store_id)
+    inventory = (
+        data.inventory.groupby("sku", as_index=False)[["on_hand", "on_order"]]
+        .sum()
+        .assign(store_id=store_id)
+    )
+    return validate_data(RetailData(sales, data.products, inventory))
+
+
 def generate_demo_data(days: int = 140, seed: int = 42, end_date: date | None = None) -> RetailData:
-    """Create reproducible non-food household retail data for two stores."""
+    """Create reproducible household data, consolidating the original two demo stores."""
 
     rng = np.random.default_rng(seed)
     product_rows = [
@@ -138,6 +163,7 @@ def generate_demo_data(days: int = 140, seed: int = 42, end_date: date | None = 
     products = pd.DataFrame(product_rows, columns=columns)
     start = (end_date or datetime.now(UTC).date()) - timedelta(days=days)
     sales_rows: list[dict] = []
+    # Keep both original sales streams so consolidation retains the demo's totals.
     stores = ["STORE-01", "STORE-02"]
 
     for store_index, store_id in enumerate(stores):
@@ -186,10 +212,11 @@ def generate_demo_data(days: int = 140, seed: int = 42, end_date: date | None = 
         if stock["store_id"] == "STORE-01" and stock["sku"] == "SKU002":
             stock["on_hand"] = 160
     products = products.drop(columns=["base_demand", "trend"])
-    return validate_data(
+    return merge_stores(
         RetailData(
             sales=pd.DataFrame(sales_rows),
             products=products,
             inventory=pd.DataFrame(inventory_rows),
-        )
+        ),
+        store_id="STORE-01",
     )
