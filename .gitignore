@@ -10,3 +10,13 @@ dist/
 storepilot.db
 demo_output/
 .DS_Store
+
+*-demo.db
+*.db-wal
+*.db-shm
+.env
+.streamlit/secrets.toml
+
+# Local reports and source archives
+/docs/FIXES.md
+/storepilot-fixed.zip
