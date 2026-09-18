@@ -395,7 +395,8 @@ def replenishment(data, base, rec, store, repo, scope):
                 }.items()
             }.get,
         )
-        with st.form(f"review:{identity}"):
+        # Keep draft edits in session state so a language switch can retain them.
+        with st.container(key=f"review:{identity}", border=True):
             qty = st.number_input(
                 t("本次补货数量"),
                 min_value=0,
@@ -419,14 +420,18 @@ def replenishment(data, base, rec, store, repo, scope):
                 "其他",
             ]
             saved_reason = prior.iloc[0].reason if not prior.empty else ""
+            reason_key = f"reason:{identity}"
+            # Re-send the selected label; changing options alone leaves stale browser text.
+            st.session_state[reason_key] = st.session_state.get(
+                reason_key, saved_reason if saved_reason in reasons else ""
+            )
             reason = st.selectbox(
                 t("调整原因"),
                 reasons,
-                index=reasons.index(saved_reason) if saved_reason in reasons else 0,
                 format_func=option_labels(
                     reasons, lambda x: t(x or "请选择（调整或不采购时必填）")
                 ),
-                key=f"reason:{identity}",
+                key=reason_key,
             )
             note = st.text_input(
                 t("补充说明"),
@@ -434,7 +439,9 @@ def replenishment(data, base, rec, store, repo, scope):
                 placeholder=t("例如：周末活动取消，先少进一箱"),
                 key=f"note:{identity}",
             )
-            submitted = st.form_submit_button(t("保存安排"), type="primary", width="stretch")
+            submitted = st.button(
+                t("保存安排"), key=f"save:{identity}", type="primary", width="stretch"
+            )
         if submitted:
             try:
                 repo.review(scope, row.to_dict(), action, qty, reason, note)

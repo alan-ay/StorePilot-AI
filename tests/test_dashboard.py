@@ -396,6 +396,10 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.app.radio(key="nav").value, "补货清单")
         self.assertEqual(self.app.selectbox(key="store_scope").value, "STORE-01")
         self.assertEqual(self.app.selectbox(key="status_filter").value, "已处理")
+        reason = next(s for s in self.app.selectbox if s.key.startswith("reason:"))
+        self.assertEqual(reason.value, "库存复核")
+        self.assertTrue(reason.proto.set_value)
+        self.assertEqual(reason.proto.raw_value, "Stock check")
         self.assertEqual(
             next(n for n in self.app.number_input if n.key.startswith("qty:")).value, 24
         )
@@ -407,6 +411,54 @@ class DashboardTests(unittest.TestCase):
         self.assertNoFailure()
         self.assertEqual(len(repo.orders(scope)), 1)
         self.assertEqual(repo.orders(scope).iloc[0].final_qty, 24)
+
+    def test_adjustment_reason_refreshes_in_both_languages_before_saving(self):
+        self.visit("补货清单")
+        self.app.selectbox(key="status_filter").set_value("全部商品").run()
+        self.app.selectbox(key="review_item").set_value(("STORE-01", "SKU001")).run()
+        next(r for r in self.app.radio if r.key.startswith("action:")).set_value("修改").run()
+        next(n for n in self.app.number_input if n.key.startswith("qty:")).set_value(24).run()
+        next(n for n in self.app.text_input if n.key.startswith("note:")).set_value(
+            "Checked stock / 已盘点"
+        ).run()
+        repo = FeedbackRepository(self.database.with_name("test-demo.db"))
+
+        for reason_value, language, label in [
+            ("库存复核", "en", "Stock check"),
+            ("资金安排", "zh", "资金安排"),
+            ("资金安排", "en", "Budget planning"),
+        ]:
+            with self.subTest(language=language, reason=reason_value):
+                next(s for s in self.app.selectbox if s.key.startswith("reason:")).set_value(
+                    reason_value
+                ).run()
+                self.app.radio(key="language").set_value(language).run()
+                self.assertNoFailure()
+                reason = next(s for s in self.app.selectbox if s.key.startswith("reason:"))
+                self.assertEqual(reason.value, reason_value)
+                self.assertIn(label, reason.options)
+                # The browser must receive the new selected label, not just new options.
+                self.assertTrue(reason.proto.set_value)
+                self.assertEqual(reason.proto.raw_value, label)
+                # Draft edits must reach the server without submitting a purchase decision.
+                self.assertEqual(reason.proto.form_id, "")
+                self.assertEqual(
+                    next(n for n in self.app.number_input if n.key.startswith("qty:")).value,
+                    24,
+                )
+                self.assertEqual(
+                    next(n for n in self.app.text_input if n.key.startswith("note:")).value,
+                    "Checked stock / 已盘点",
+                )
+                self.assertTrue(repo.list_feedback().empty)
+
+        self.button("Save decision").click().run()
+        self.assertNoFailure()
+        feedback = repo.list_feedback()
+        self.assertEqual(len(feedback), 1)
+        self.assertEqual(feedback.iloc[0].reason, "资金安排")
+        self.assertEqual(feedback.iloc[0].final_qty, 24)
+        self.assertEqual(feedback.iloc[0].note, "Checked stock / 已盘点")
 
     def test_english_import_errors_and_examples(self):
         self.app.radio(key="language").set_value("en").run()

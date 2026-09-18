@@ -4,6 +4,8 @@ All notable changes to StorePilot are recorded in this file.
 
 ## Unreleased
 
+- Refresh the selected adjustment reason when switching languages, preserving
+  unsaved replenishment quantities and notes until the decision is saved.
 - Combine the two demo stores into `STORE-01`, preserving sales revenue and stock
   totals. Use the same merged data in CSV examples and hide transfer navigation
   when only one store is present.
