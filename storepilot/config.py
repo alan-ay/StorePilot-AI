@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from .i18n import ValidationError
+
 
 @dataclass(frozen=True)
 class StrategyConfig:
@@ -41,7 +43,7 @@ class StrategyConfig:
             ),
         }
         if name not in presets:
-            raise ValueError(f"未知策略：{name}")
+            raise ValidationError("未知策略：{0}", name)
         return replace(presets[name], max_purchase_budget=budget)
 
     def validate(self) -> None:
@@ -53,19 +55,19 @@ class StrategyConfig:
             self.waste_cost_weight,
         ]
         if not all(math.isfinite(v) and v >= 0 for v in values):
-            raise ValueError("策略参数必须为非负有限数值")
+            raise ValidationError("策略参数必须为非负有限数值")
         if self.max_purchase_budget is not None and not math.isfinite(self.max_purchase_budget):
-            raise ValueError("采购预算必须为有限数值")
+            raise ValidationError("采购预算必须为有限数值")
         if not 0.5 <= self.service_level < 1:
-            raise ValueError("service_level 必须在 [0.5, 1) 范围内")
+            raise ValidationError("service_level 必须在 [0.5, 1) 范围内")
         if (
             not math.isfinite(self.review_period_days)
             or self.review_period_days < 1
             or self.review_period_days % 1
         ):
-            raise ValueError("盘点周期必须为正整数")
+            raise ValidationError("盘点周期必须为正整数")
         if self.max_purchase_budget is not None and self.max_purchase_budget < 0:
-            raise ValueError("采购预算不能为负数")
+            raise ValidationError("采购预算不能为负数")
 
 
 @dataclass(frozen=True)
@@ -89,18 +91,18 @@ class ScenarioConfig:
             self.supplier_delay_days,
         ]
         if not all(math.isfinite(v) for v in values):
-            raise ValueError("情景参数必须为有限数值")
+            raise ValidationError("情景参数必须为有限数值")
         if self.price_change_pct <= -100:
-            raise ValueError("价格降幅必须小于 100%")
+            raise ValidationError("价格降幅必须小于 100%")
         if any(
             v < -100
             for v in [self.promotion_lift_pct, self.traffic_change_pct, self.holiday_lift_pct]
         ):
-            raise ValueError("需求变化不能低于 -100%")
+            raise ValidationError("需求变化不能低于 -100%")
         if self.supplier_delay_days < 0 or self.supplier_delay_days % 1:
-            raise ValueError("供应延迟必须为非负整数")
+            raise ValidationError("供应延迟必须为非负整数")
         if self.price_elasticity > 0:
-            raise ValueError("本版价格弹性假设需为非正数")
+            raise ValidationError("本版价格弹性假设需为非正数")
 
     def demand_multiplier(self) -> float:
         self.validate()

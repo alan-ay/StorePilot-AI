@@ -6,6 +6,8 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 import pandas as pd
 
+from .i18n import ValidationError
+
 SALES_REQUIRED = {"date", "store_id", "sku", "units"}
 PRODUCT_REQUIRED = {
     "sku",
@@ -29,7 +31,7 @@ class RetailData:
 def _require_columns(frame: pd.DataFrame, required: set[str], label: str) -> None:
     missing = sorted(required - set(frame.columns))
     if missing:
-        raise ValueError(f"{label} 缺少字段：{', '.join(missing)}")
+        raise ValidationError("{0} 缺少字段：{1}", label, ", ".join(missing))
 
 
 def validate_data(data: RetailData) -> RetailData:
@@ -41,22 +43,22 @@ def validate_data(data: RetailData) -> RetailData:
     ):
         _require_columns(frame, required, label)
         if frame.empty:
-            raise ValueError(f"{label}没有数据，请检查文件内容")
+            raise ValidationError("{0}没有数据，请检查文件内容", label)
         for key in required - {"date", "units", "cost", "price", "on_hand"}:
             if frame[key].isna().any() or frame[key].astype(str).str.strip().eq("").any():
-                raise ValueError(f"{label}的 {key} 不能为空")
+                raise ValidationError("{0}的 {1} 不能为空", label, key)
             frame[key] = frame[key].astype(str).str.strip()
 
     sales["date"] = pd.to_datetime(sales["date"], errors="raise").dt.normalize()
     if sales["date"].isna().any() or sales["date"].dt.tz is not None:
-        raise ValueError("日期不能为空，请使用门店当地的 YYYY-MM-DD 日期")
+        raise ValidationError("日期不能为空，请使用门店当地的 YYYY-MM-DD 日期")
     for frame, keys, label in (
         (sales, ["store_id", "sku", "date"], "每日销量"),
         (products, ["sku"], "商品"),
         (inventory, ["store_id", "sku"], "库存"),
     ):
         if frame.duplicated(keys).any():
-            raise ValueError(f"{label}存在重复记录，请按 {', '.join(keys)} 合并后导入")
+            raise ValidationError("{0}存在重复记录，请按 {1} 合并后导入", label, ", ".join(keys))
 
     def numeric(frame, column, default=None, minimum=0, integer=False):
         if column not in frame:
@@ -65,11 +67,11 @@ def validate_data(data: RetailData) -> RetailData:
             frame[column] = frame[column].fillna(default)
         frame[column] = pd.to_numeric(frame[column], errors="raise")
         if not np.isfinite(frame[column]).all():
-            raise ValueError(f"{column} 必须为完整的有限数值")
+            raise ValidationError("{0} 必须为完整的有限数值", column)
         if (frame[column] < minimum).any():
-            raise ValueError(f"{column} 不能为负数或小于 {minimum}")
+            raise ValidationError("{0} 不能为负数或小于 {1}", column, minimum)
         if integer and (frame[column] % 1 != 0).any():
-            raise ValueError(f"{column} 必须为整数")
+            raise ValidationError("{0} 必须为整数", column)
 
     for frame, column in ((sales, "units"), (inventory, "on_hand"), (products, "cost")):
         numeric(frame, column)
@@ -78,7 +80,7 @@ def validate_data(data: RetailData) -> RetailData:
     for column in ("promotion", "stockout"):
         numeric(sales, column, default=0, integer=True)
         if not sales[column].isin([0, 1]).all():
-            raise ValueError(f"{column} 只能为 0 或 1")
+            raise ValidationError("{0} 只能为 0 或 1", column)
     for column, default in {
         "shelf_life_days": 365,
         "lead_time_days": 2,
@@ -89,7 +91,7 @@ def validate_data(data: RetailData) -> RetailData:
 
     unknown = (set(sales["sku"]) | set(inventory["sku"])) - set(products["sku"])
     if unknown:
-        raise ValueError(f"以下 SKU 未出现在商品表：{', '.join(sorted(unknown))}")
+        raise ValidationError("以下 SKU 未出现在商品表：{0}", ", ".join(sorted(unknown)))
     if "price" not in sales:
         sales["price"] = sales["sku"].map(products.set_index("sku")["price"])
     else:
@@ -97,7 +99,7 @@ def validate_data(data: RetailData) -> RetailData:
     numeric(sales, "price", minimum=0.01)
     ends = sales.groupby(["store_id", "sku"])["date"].max()
     if ends.nunique() > 1:
-        raise ValueError("各门店商品的销售记录需更新至同一截止日期，零销量日也请保留记录")
+        raise ValidationError("各门店商品的销售记录需更新至同一截止日期，零销量日也请保留记录")
     return RetailData(
         sales.sort_values(["store_id", "sku", "date"]).reset_index(drop=True),
         products.sort_values("sku").reset_index(drop=True),

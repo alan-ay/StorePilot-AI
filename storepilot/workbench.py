@@ -9,6 +9,7 @@ import pandas as pd
 
 from .config import StrategyConfig
 from .data import RetailData
+from .i18n import ValidationError
 from .optimization import InventoryOptimizer
 from .scenarios import apply_scenario
 
@@ -36,17 +37,17 @@ def scenario_plan(base_forecast, data, strategy, scenario):
 def prepare_review(row: dict, action: str, quantity: float, reason: str, note: str) -> dict:
     original = int(row["suggested_order_qty"])
     if action not in {"接受", "修改", "拒绝"}:
-        raise ValueError("请选择接受、修改或拒绝")
+        raise ValidationError("请选择接受、修改或拒绝")
     quantity = original if action == "接受" else 0 if action == "拒绝" else quantity
     if not math.isfinite(quantity) or quantity < 0 or quantity % 1:
-        raise ValueError("补货数量必须为非负整数")
+        raise ValidationError("补货数量必须为非负整数")
     pack, minimum = int(row["case_pack"]), int(row["min_order_qty"])
     if quantity and (quantity % pack or quantity < minimum):
-        raise ValueError(f"请按 {pack} 件整箱订购，起订量为 {minimum} 件；不订购请填 0")
+        raise ValidationError("请按 {0} 件整箱订购，起订量为 {1} 件；不订购请填 0", pack, minimum)
     if action in {"修改", "拒绝"} and not reason.strip():
-        raise ValueError("请填写调整原因")
+        raise ValidationError("请填写调整原因")
     if not math.isfinite(float(row["unit_cost"])) or row["unit_cost"] < 0:
-        raise ValueError("单价不能为负数或空值")
+        raise ValidationError("单价不能为负数或空值")
     return {
         "store_id": str(row["store_id"]),
         "sku": str(row["sku"]),
