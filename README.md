@@ -22,7 +22,7 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 - adjustable conservative, balanced and growth strategies;
 - replenishment, overstock, stockout and expiry-risk recommendations;
 - price, promotion, holiday, traffic and supplier-delay simulations;
-- multi-store stock-transfer suggestions;
+- stock-transfer suggestions when multiple stores are imported;
 - human feedback records and adaptive model retraining;
 - supplier-grouped purchase orders;
 - Chinese and English navigation, forms, charts, exports, and daily reports.
@@ -30,7 +30,7 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 
 ## Daily Workflow
 
-1. Choose a store in the sidebar and review the overview's stock concerns.
+1. Review the overview's stock concerns for the current store.
 2. Open **补货清单**, inspect a product's stock position and delivery assumptions,
    then accept the quantity, change it, or choose not to purchase.
 3. Open **采购与记录**. Check the supplier-grouped draft and approve it locally.
@@ -54,7 +54,10 @@ streamlit run app.py
 ```
 
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
-The app opens with labelled sample data from two stores. The demo and downloadable
+The app opens with labelled sample data for one store, `STORE-01`. Sales and stock
+from the original two demo stores are combined, preserving total quantities and
+sales revenue. The store is selected automatically; transfer navigation appears
+only when multiple stores are imported. The demo and downloadable
 CSV examples contain non-food household essentials: cleaning products, laundry
 supplies, toiletries, and paper goods. Uploaded product names and categories are
 preserved; uploads are not restricted to this sample catalog.

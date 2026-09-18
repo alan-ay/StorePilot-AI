@@ -74,8 +74,12 @@ validation and forecast fitting succeed.
 The built-in demo and downloadable CSV examples use only non-food household
 essentials: dishwashing sponges and liquid, laundry soap, hand wash, toothbrushes,
 tissues, bin bags, and kitchen towels. Sales and inventory reference the same
-eight SKUs across two stores. Shelf lives are illustrative product storage periods,
-not batch expiry dates.
+eight SKUs in one store, `STORE-01`. The original two demo stores are consolidated:
+daily units, on-hand stock, and on-order stock are summed by SKU. Selling prices
+are weighted by units sold to preserve daily revenue; zero-sales days use the
+mean price. Promotion and stockout flags remain set if either source store had
+the flag. Shelf lives are illustrative product storage periods, not batch expiry
+dates.
 
 This sample catalog does not restrict imports. Your uploaded product names and
 categories are retained, including when the interface language changes. CSV
