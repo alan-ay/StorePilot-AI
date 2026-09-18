@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 import unittest
@@ -8,6 +9,9 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest, app_test
 
+from storepilot.config import StrategyConfig
+from storepilot.dashboard import analyse, selected_plan
+from storepilot.data import RetailData
 from storepilot.repository import FeedbackRepository
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
@@ -117,6 +121,127 @@ class DashboardTests(unittest.TestCase):
         self.button("检查并使用这组数据").click().run()
         self.assertTrue(any("三份" in e.value for e in self.app.error))
         self.assertEqual(len(self.app.session_state["active_data"].sales), original)
+
+    def test_saved_review_is_restored_after_navigation(self):
+        self.visit("补货清单")
+        self.app.selectbox(key="review_item").set_value(("STORE-01", "SKU001")).run()
+        next(r for r in self.app.radio if r.key.startswith("action:")).set_value("修改").run()
+        next(n for n in self.app.number_input if n.key.startswith("qty:")).set_value(24)
+        next(s for s in self.app.selectbox if s.key.startswith("reason:")).set_value("库存复核")
+        next(t for t in self.app.text_input if t.key.startswith("note:")).set_value("已盘点")
+        self.button("保存安排").click().run()
+        self.visit("今日概览")
+        self.visit("补货清单")
+        self.app.selectbox(key="status_filter").set_value("已处理").run()
+        self.assertNoFailure()
+        self.assertEqual(
+            next(r for r in self.app.radio if r.key.startswith("action:")).value, "修改"
+        )
+        self.assertEqual(
+            next(n for n in self.app.number_input if n.key.startswith("qty:")).value, 24
+        )
+        self.assertEqual(
+            next(s for s in self.app.selectbox if s.key.startswith("reason:")).value, "库存复核"
+        )
+        self.assertEqual(
+            next(t for t in self.app.text_input if t.key.startswith("note:")).value, "已盘点"
+        )
+
+    def test_approval_confirmation_does_not_carry_to_another_order(self):
+        from storepilot.workbench import dataset_key, decision_scope
+
+        scope = decision_scope(
+            dataset_key(self.app.session_state["active_data"], "演示数据"), StrategyConfig()
+        )
+        repo = FeedbackRepository(self.database.with_name("test-demo.db"))
+        for supplier in ["V1", "V2"]:
+            repo.review(
+                scope,
+                {
+                    "store_id": "STORE-01",
+                    "sku": supplier,
+                    "supplier_id": supplier,
+                    "product_name": "Water",
+                    "suggested_order_qty": 24,
+                    "case_pack": 6,
+                    "min_order_qty": 6,
+                    "unit_cost": 2.5,
+                },
+                "接受",
+                24,
+            )
+        self.visit("采购与记录")
+        next(c for c in self.app.checkbox if "已核对" in c.label).check().run()
+        self.app.selectbox(key="order_group").set_value(("STORE-01", "V2")).run()
+        self.assertNoFailure()
+        self.assertFalse(next(c for c in self.app.checkbox if "已核对" in c.label).value)
+        self.button("审核本单").click().run()
+        self.assertTrue(repo.orders().empty)
+
+    def test_store_without_sales_has_empty_states(self):
+        import pandas as pd
+
+        data = self.app.session_state["active_data"]
+        inventory = pd.concat([data.inventory, data.inventory.head(1).assign(store_id="NEW")])
+        self.app.session_state["active_data"] = RetailData(data.sales, data.products, inventory)
+        self.app.run()
+        self.app.selectbox(key="store_scope").set_value("NEW").run()
+        self.assertNoFailure()
+        for page in ["今日概览", "销售走势", "情景测算", "补货清单", "数据与设置"]:
+            self.visit(page)
+
+    def test_zero_budget_and_custom_preferences_survive_navigation(self):
+        self.visit("数据与设置")
+        self.app.checkbox(key="policy_budget_enabled").check()
+        self.app.number_input(key="policy_budget").set_value(0.0)
+        self.app.checkbox(key="policy_custom").check()
+        self.app.number_input(key="policy_safety").set_value(3.0)
+        self.button("保存备货偏好").click().run()
+        self.visit("今日概览")
+        self.visit("数据与设置")
+        self.assertEqual(self.app.number_input(key="policy_budget").value, 0.0)
+        self.assertTrue(self.app.checkbox(key="policy_custom").value)
+        self.button("保存备货偏好").click().run()
+        self.assertEqual(self.app.session_state["policy"].safety_days, 3.0)
+
+    def test_failed_policy_change_preserves_working_policy(self):
+        self.visit("数据与设置")
+        data = self.app.session_state["active_data"]
+        policy = self.app.session_state["policy"]
+        rec = selected_plan(data, analyse(data), policy)
+        self.app.selectbox(key="policy_name").set_value("增长")
+        with patch(
+            "storepilot.dashboard.selected_plan", side_effect=[rec, ValueError("预测天数不足")]
+        ):
+            self.button("保存备货偏好").click().run()
+        self.assertFalse(list(self.app.exception))
+        self.assertTrue(any("未保存" in e.value for e in self.app.error))
+        self.assertEqual(self.app.session_state["policy"], policy)
+        self.visit("今日概览")
+
+    def test_failed_import_plan_preserves_working_data(self):
+        self.visit("数据与设置")
+        data = self.app.session_state["active_data"]
+        base = analyse(data)
+        rec = selected_plan(data, base, self.app.session_state["policy"])
+        uploads = []
+        for frame in [data.sales, data.products, data.inventory.assign(on_hand=1)]:
+            upload = io.BytesIO(frame.to_csv(index=False).encode())
+            upload.size = len(upload.getvalue())
+            uploads.append(upload)
+        with (
+            patch("streamlit.file_uploader", side_effect=uploads),
+            patch("storepilot.dashboard.analyse", return_value=base),
+            patch(
+                "storepilot.dashboard.selected_plan", side_effect=[rec, ValueError("预测天数不足")]
+            ),
+        ):
+            self.button("检查并使用这组数据").click().run()
+        self.assertFalse(list(self.app.exception))
+        self.assertTrue(any("未导入" in e.value for e in self.app.error))
+        self.assertEqual(self.app.session_state["source"], "演示数据")
+        self.assertTrue(self.app.session_state["active_data"].inventory.equals(data.inventory))
+        self.visit("今日概览")
 
 
 def tearDownModule():
