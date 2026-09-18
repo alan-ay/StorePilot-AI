@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -32,65 +32,79 @@ def _require_columns(frame: pd.DataFrame, required: set[str], label: str) -> Non
 
 
 def validate_data(data: RetailData) -> RetailData:
-    sales = data.sales.copy()
-    products = data.products.copy()
-    inventory = data.inventory.copy()
-    _require_columns(sales, SALES_REQUIRED, "销售数据")
-    _require_columns(products, PRODUCT_REQUIRED, "商品数据")
-    _require_columns(inventory, INVENTORY_REQUIRED, "库存数据")
+    sales, products, inventory = (data.sales.copy(), data.products.copy(), data.inventory.copy())
+    for frame, required, label in (
+        (sales, SALES_REQUIRED, "销售数据"),
+        (products, PRODUCT_REQUIRED, "商品数据"),
+        (inventory, INVENTORY_REQUIRED, "库存数据"),
+    ):
+        _require_columns(frame, required, label)
+        if frame.empty:
+            raise ValueError(f"{label}没有数据，请检查文件内容")
+        for key in required - {"date", "units", "cost", "price", "on_hand"}:
+            if frame[key].isna().any() or frame[key].astype(str).str.strip().eq("").any():
+                raise ValueError(f"{label}的 {key} 不能为空")
+            frame[key] = frame[key].astype(str).str.strip()
 
     sales["date"] = pd.to_datetime(sales["date"], errors="raise").dt.normalize()
-    for frame in (sales, products, inventory):
-        frame["sku"] = frame["sku"].astype(str)
-    for frame in (sales, inventory):
-        frame["store_id"] = frame["store_id"].astype(str)
+    if sales["date"].isna().any() or sales["date"].dt.tz is not None:
+        raise ValueError("日期不能为空，请使用门店当地的 YYYY-MM-DD 日期")
+    for frame, keys, label in (
+        (sales, ["store_id", "sku", "date"], "每日销量"),
+        (products, ["sku"], "商品"),
+        (inventory, ["store_id", "sku"], "库存"),
+    ):
+        if frame.duplicated(keys).any():
+            raise ValueError(f"{label}存在重复记录，请按 {', '.join(keys)} 合并后导入")
 
-    sales["units"] = pd.to_numeric(sales["units"], errors="raise")
-    inventory["on_hand"] = pd.to_numeric(inventory["on_hand"], errors="raise")
-    products["cost"] = pd.to_numeric(products["cost"], errors="raise")
-    products["price"] = pd.to_numeric(products["price"], errors="raise")
-    if (sales["units"] < 0).any() or (inventory["on_hand"] < 0).any():
-        raise ValueError("销量和库存不能为负数")
-    if (products["cost"] < 0).any() or (products["price"] <= 0).any():
-        raise ValueError("商品成本不能为负数，售价必须大于0")
+    def numeric(frame, column, default=None, minimum=0, integer=False):
+        if column not in frame:
+            frame[column] = default
+        if default is not None:
+            frame[column] = frame[column].fillna(default)
+        frame[column] = pd.to_numeric(frame[column], errors="raise")
+        if not np.isfinite(frame[column]).all():
+            raise ValueError(f"{column} 必须为完整的有限数值")
+        if (frame[column] < minimum).any():
+            raise ValueError(f"{column} 不能为负数或小于 {minimum}")
+        if integer and (frame[column] % 1 != 0).any():
+            raise ValueError(f"{column} 必须为整数")
 
-    sales["promotion"] = sales.get("promotion", 0).fillna(0).astype(int)
-    sales["stockout"] = sales.get("stockout", 0).fillna(0).astype(int)
-    inventory["on_order"] = inventory.get("on_order", 0).fillna(0).astype(float)
-
-    defaults = {
+    for frame, column in ((sales, "units"), (inventory, "on_hand"), (products, "cost")):
+        numeric(frame, column)
+    numeric(products, "price", minimum=0.01)
+    numeric(inventory, "on_order", default=0)
+    for column in ("promotion", "stockout"):
+        numeric(sales, column, default=0, integer=True)
+        if not sales[column].isin([0, 1]).all():
+            raise ValueError(f"{column} 只能为 0 或 1")
+    for column, default in {
         "shelf_life_days": 365,
         "lead_time_days": 2,
         "case_pack": 1,
         "min_order_qty": 1,
-    }
-    for column, default in defaults.items():
-        products[column] = pd.to_numeric(
-            products.get(column, pd.Series(default, index=products.index)).fillna(default),
-            errors="raise",
-        )
+    }.items():
+        numeric(products, column, default=default, minimum=1, integer=True)
 
+    unknown = (set(sales["sku"]) | set(inventory["sku"])) - set(products["sku"])
+    if unknown:
+        raise ValueError(f"以下 SKU 未出现在商品表：{', '.join(sorted(unknown))}")
     if "price" not in sales:
-        sales = sales.merge(products[["sku", "price"]], on="sku", how="left")
+        sales["price"] = sales["sku"].map(products.set_index("sku")["price"])
     else:
-        price_map = products.set_index("sku")["price"]
-        sales["price"] = sales["price"].fillna(sales["sku"].map(price_map))
-
-    product_skus = set(products["sku"])
-    unknown_sales = sorted(set(sales["sku"]) - product_skus)
-    unknown_inventory = sorted(set(inventory["sku"]) - product_skus)
-    if unknown_sales or unknown_inventory:
-        unknown = sorted(set(unknown_sales + unknown_inventory))
-        raise ValueError(f"以下 SKU 未出现在商品表：{', '.join(unknown)}")
-
+        sales["price"] = sales["price"].fillna(sales["sku"].map(products.set_index("sku")["price"]))
+    numeric(sales, "price", minimum=0.01)
+    ends = sales.groupby(["store_id", "sku"])["date"].max()
+    if ends.nunique() > 1:
+        raise ValueError("各门店商品的销售记录需更新至同一截止日期，零销量日也请保留记录")
     return RetailData(
-        sales=sales.sort_values(["store_id", "sku", "date"]).reset_index(drop=True),
-        products=products.drop_duplicates("sku").reset_index(drop=True),
-        inventory=inventory.drop_duplicates(["store_id", "sku"]).reset_index(drop=True),
+        sales.sort_values(["store_id", "sku", "date"]).reset_index(drop=True),
+        products.sort_values("sku").reset_index(drop=True),
+        inventory.sort_values(["store_id", "sku"]).reset_index(drop=True),
     )
 
 
-def generate_demo_data(days: int = 140, seed: int = 42) -> RetailData:
+def generate_demo_data(days: int = 140, seed: int = 42, end_date: date | None = None) -> RetailData:
     """Create reproducible two-store data with trends, seasonality and stockouts."""
 
     rng = np.random.default_rng(seed)
@@ -119,7 +133,7 @@ def generate_demo_data(days: int = 140, seed: int = 42) -> RetailData:
         "trend",
     ]
     products = pd.DataFrame(product_rows, columns=columns)
-    start = datetime.now(UTC).date() - timedelta(days=days)
+    start = (end_date or datetime.now(UTC).date()) - timedelta(days=days)
     sales_rows: list[dict] = []
     stores = ["STORE-01", "STORE-02"]
 
@@ -163,6 +177,11 @@ def generate_demo_data(days: int = 140, seed: int = 42) -> RetailData:
                     "on_order": 0,
                 }
             )
+    for stock in inventory_rows:
+        if stock["store_id"] == "STORE-02" and stock["sku"] == "SKU001":
+            stock["on_hand"] = 300
+        if stock["store_id"] == "STORE-01" and stock["sku"] == "SKU002":
+            stock["on_hand"] = 160
     products = products.drop(columns=["base_demand", "trend"])
     return validate_data(
         RetailData(

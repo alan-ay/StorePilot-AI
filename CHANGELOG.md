@@ -2,6 +2,17 @@
 
 All notable changes to StorePilot are recorded in this file.
 
+## 0.2.0 — 2026-09-05
+
+- Replaced the tab-heavy dashboard with a store-scoped daily workbench.
+- Added product search, clear stock explanations and inline review actions.
+- Connected owner decisions to persistent supplier drafts and immutable approvals.
+- Prevented duplicate approvals within a batch and rechecked budgets after manual edits.
+- Kept scenario assumptions separate from active purchasing decisions.
+- Isolated sample orders from store records and retained historical purchase batches.
+- Fixed omitted optional CSV columns, invalid quantities, minimum/case rounding and in-transit transfers.
+- Added workflow tests and updated the operating guide and calculation boundaries.
+
 ## 0.1.0 — 2026-09-04
 
 - Added daily demand forecasts with uncertainty intervals.

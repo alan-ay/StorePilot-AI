@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-STATUS_PRIORITY = ["高缺货风险", "临期/报废风险", "需要关注", "库存偏高"]
-
 
 def _product_list(frame: pd.DataFrame, limit: int = 3) -> str:
     if frame.empty:
@@ -44,7 +42,7 @@ def generate_chinese_report(
         f"# StorePilot 每日经营简报｜{latest_date:%Y-%m-%d}",
         "",
         (
-            f"当前采用“{strategy_name}”经营策略。昨日共销售 **{sales_units:.0f} 件**商品，"
+            f"当前采用“{strategy_name}”经营策略。最近营业日共销售 **{sales_units:.0f} 件**商品，"
             f"估算营业额为 **¥{revenue:,.2f}**。"
         ),
         "",
@@ -61,11 +59,13 @@ def generate_chinese_report(
             f"{top['suggested_order_qty']:.0f} 件。"
         )
     if expiry.empty:
-        lines.append("- 暂未发现明显临期或报废风险。")
+        lines.append("- 当前没有保质期窗口内的库存积压提示；批次到期日仍需人工核对。")
     else:
-        lines.append(f"- **临期处理：** {_product_list(expiry)}，建议促销、减少采购或跨店调拨。")
+        lines.append(
+            f"- **库存复核：** {_product_list(expiry)} 库存偏多，请核对批次到期日，再决定促销或调拨。"
+        )
     if overstock.empty:
-        lines.append("- 库存总体处于正常区间。")
+        lines.append("- 暂无其他库存积压提示。")
     else:
         lines.append(f"- **库存偏高：** {_product_list(overstock)}，建议暂停补货并观察销售速度。")
 
@@ -86,18 +86,18 @@ def generate_chinese_report(
         ]
     )
     if transfers.empty:
-        lines.append("- 暂无明显优于重新采购的跨店调拨机会。")
+        lines.append("- 暂无现货余量充足的跨店调拨建议。")
     else:
         total_transfer = int(transfers["quantity"].sum())
         total_saving = float(transfers["estimated_purchase_saving"].sum())
         lines.append(
             f"- 建议执行 {len(transfers)} 笔门店调拨，共 {total_transfer} 件，"
-            f"预计减少采购支出 ¥{total_saving:,.2f}。"
+            f"对应采购货值 ¥{total_saving:,.2f}，尚未扣除运输成本，也未调减采购清单。"
         )
     lines.extend(
         [
             "",
-            "## 风险提示",
+            "## 使用说明",
             "",
             (
                 "预测结果存在不确定性。供应延误、天气突变、社区活动和竞争对手促销等"

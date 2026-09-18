@@ -85,7 +85,7 @@ class PipelineTests(unittest.TestCase):
         self.assertLessEqual(result.recommendations["purchase_cost"].sum(), 500.01)
 
     def test_report_contains_required_sections(self) -> None:
-        for section in ("今日重点", "销售趋势", "采购与调拨", "风险提示"):
+        for section in ("今日重点", "销售趋势", "采购与调拨", "使用说明"):
             self.assertIn(section, self.result.report)
 
 

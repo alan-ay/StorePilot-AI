@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 from statistics import NormalDist
 
 import numpy as np
@@ -13,8 +14,7 @@ def _round_order(quantity: float, case_pack: int, minimum: int) -> int:
     if quantity <= 0:
         return 0
     pack = max(1, int(case_pack))
-    rounded = int(math.ceil(quantity / pack) * pack)
-    return max(rounded, int(minimum))
+    return int(math.ceil(max(quantity, minimum) / pack) * pack)
 
 
 class InventoryOptimizer:
@@ -30,6 +30,7 @@ class InventoryOptimizer:
     ) -> pd.DataFrame:
         strategy.validate()
         scenario = scenario or ScenarioConfig()
+        scenario.validate()
         product_map = products.set_index("sku")
         rows: list[dict] = []
 
@@ -44,11 +45,17 @@ class InventoryOptimizer:
             if sku_forecast.empty:
                 continue
             lead_time = max(1, int(product["lead_time_days"]) + scenario.supplier_delay_days)
-            protection_days = lead_time + strategy.review_period_days
+            protection_days = int(lead_time + strategy.review_period_days)
+            if len(sku_forecast) < protection_days:
+                raise ValueError("预测天数不足以覆盖交货周期与补货周期")
             protected = sku_forecast.head(protection_days)
             expected_demand = float(protected["predicted_units"].sum())
+            # A zero-demand scenario also has zero uncertainty; do not invent safety stock.
+            minimum_std = 0.5 if protected["upper_units"].gt(0).any() else 0.0
             daily_std = float(
-                np.maximum(0.5, (protected["upper_units"] - protected["lower_units"]) / 2.56).mean()
+                np.maximum(
+                    minimum_std, (protected["upper_units"] - protected["lower_units"]) / 2.56
+                ).mean()
             )
             z_score = NormalDist().inv_cdf(strategy.service_level)
             safety_stock = z_score * daily_std * math.sqrt(lead_time)
@@ -69,11 +76,13 @@ class InventoryOptimizer:
                 int(product["case_pack"]),
                 int(product["min_order_qty"]),
             )
-            daily_demand = max(float(protected.predicted_units.mean()), 0.01)
-            days_of_cover = (on_hand + on_order) / daily_demand
+            daily_demand = float(protected.predicted_units.mean())
+            days_of_cover = on_hand / daily_demand if daily_demand > 0 else math.inf
             expected_shortage = max(0.0, expected_demand - on_hand - on_order)
             excess_units = max(0.0, on_hand + on_order - target_stock)
-            expiry_risk = max(0.0, on_hand - demand_before_expiry)
+            expiry_risk = (
+                max(0.0, on_hand - demand_before_expiry) if shelf_life <= len(sku_forecast) else 0.0
+            )
             margin = float(product["price"] - product["cost"])
             risk_score = (
                 strategy.stockout_cost_weight * expected_shortage * max(margin, 0.1)
@@ -123,6 +132,8 @@ class InventoryOptimizer:
                 }
             )
 
+        if not rows:
+            raise ValueError("库存与销售数据中没有可匹配的门店商品")
         recommendations = pd.DataFrame(rows).sort_values(
             ["priority_score", "expected_shortage"], ascending=False
         )
@@ -134,13 +145,13 @@ class InventoryOptimizer:
         result["budget_adjusted"] = False
         if budget is None:
             return result
-        remaining = float(budget)
+        remaining = Decimal(str(budget))
         for index, row in result.sort_values("priority_score", ascending=False).iterrows():
-            cost = float(row["purchase_cost"])
+            cost = Decimal(str(row["purchase_cost"]))
             if cost <= remaining:
                 remaining -= cost
                 continue
-            affordable = int(remaining // max(float(row["unit_cost"]), 0.01))
+            affordable = int(remaining // Decimal(str(row["unit_cost"])))
             original = int(row["suggested_order_qty"])
             pack = max(1, int(row["case_pack"]))
             minimum = max(1, int(row["min_order_qty"]))
@@ -151,12 +162,14 @@ class InventoryOptimizer:
                 result.at[index, "suggested_order_qty"] * row["unit_cost"], 2
             )
             result.at[index, "budget_adjusted"] = True
-            remaining = max(0, remaining - result.at[index, "purchase_cost"])
+            remaining = max(Decimal(0), remaining - Decimal(str(result.at[index, "purchase_cost"])))
         return result
 
     def suggest_transfers(self, recommendations: pd.DataFrame) -> pd.DataFrame:
         transfer_rows: list[dict] = []
-        for sku, group in recommendations.groupby("sku"):
+        physical = recommendations.copy()
+        physical["excess_units"] = (physical["on_hand"] - physical["target_stock"]).clip(lower=0)
+        for sku, group in physical.groupby("sku"):
             donors = group[group["excess_units"] > group["daily_demand"] * 3].copy()
             receivers = group[group["expected_shortage"] > 0].copy()
             for receiver_index, receiver in receivers.iterrows():
@@ -178,7 +191,7 @@ class InventoryOptimizer:
                             "to_store": receiver["store_id"],
                             "quantity": quantity,
                             "estimated_purchase_saving": round(quantity * receiver["unit_cost"], 2),
-                            "reason": "门店间余量可覆盖缺货，优先调拨后采购",
+                            "reason": "有现货余量可供调拨，请核对运输时间与费用",
                         }
                     )
                     shortage -= quantity

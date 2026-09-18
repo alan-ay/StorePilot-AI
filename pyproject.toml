@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "storepilot-retail"
-version = "0.1.0"
+version = "0.2.0"
 description = "Adaptive demand forecasting and inventory decision support for small retailers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,7 @@ dependencies = [
   "pandas>=2.1",
   "scikit-learn>=1.4",
   "streamlit>=1.63,<2",
+  "altair>=5,<7",
 ]
 
 [project.optional-dependencies]
@@ -40,3 +41,6 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.setuptools.package-data]
+storepilot = ["assets/*.css"]

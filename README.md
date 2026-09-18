@@ -5,7 +5,7 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 
 - [Overview](#overview)
 - [Features](#features)
-- [Outcome](#outcome-daily-workflow)
+- [Outcome](#daily-workflow)
 - [Start](#getting-started)
 - [Input_data](#input-data)
 - [Structure](#project-structure)
@@ -28,39 +28,34 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 - a daily Chinese management report.
 
 
-## Outcome: Daily Workflow
+## Daily Workflow
 
-The intended StorePilot AI workflow minimizes the amount of manual inventory analysis required from store owners.
+1. Choose a store in the sidebar and review the overview's stock concerns.
+2. Open **补货清单**, inspect a product's stock position and delivery assumptions,
+   then accept the quantity, change it, or choose not to purchase.
+3. Open **采购与记录**. Check the supplier-grouped draft and approve it locally.
+4. Download the approved order. Arrange delivery with the supplier separately.
 
-Each day, the store owner only needs to:
-
-1. Read the automatically generated **daily business report**.
-2. Review products flagged as **high-risk or anomalous**.
-3. Accept or modify **replenishment, promotion, and inventory-transfer recommendations**.
-4. Review and approve automatically generated **purchase orders**.
-5. Allow the system to observe actual outcomes and **continuously improve its models and future decisions**.
-
-The long-term objective is to transform StorePilot AI from a forecasting tool into an **adaptive retail decision engine** capable of supporting increasingly autonomous store operations.
-
+Manual edits update the draft quantity and cost. Case packs and minimum orders
+are enforced, and the full batch budget is checked again before approval.
+An approved order is an immutable snapshot; repeating approval returns the same
+order. New data or a different inventory policy creates a new review batch.
+Check historic orders before purchasing again.
 
 ## Getting started
 
+Python 3.11 or newer is required. The release checks use Python 3.12.
+
 ```bash
 python -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
-pip install -e .
+source .venv/bin/activate
+python -m pip install -e ".[dev]" -c constraints-tested.txt
 streamlit run app.py
 ```
 
-The dashboard starts with a reproducible two-store sample dataset. Turn off
-**Use built-in demo data** in the sidebar to upload store data as CSV files.
-
-To verify the core system without starting the dashboard:
-
-```bash
-python -m storepilot.demo
-python -m unittest discover -s tests -v
-```
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
+The app opens with labelled sample data from two stores. Import your own files
+through **数据与设置 → 导入数据**. No external model service or API key is needed.
 
 ## Input data
 
