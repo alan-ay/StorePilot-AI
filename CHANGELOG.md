@@ -4,6 +4,9 @@ All notable changes to StorePilot are recorded in this file.
 
 ## Unreleased
 
+- Combine the two demo stores into `STORE-01`, preserving sales revenue and stock
+  totals. Use the same merged data in CSV examples and hide transfer navigation
+  when only one store is present.
 - Replace food and drink demo products with non-food household essentials in the
   dashboard and downloadable import examples; keep uploaded catalogs unchanged.
 - Add a Chinese/English sidebar selector for the interface, reports, and exports.
