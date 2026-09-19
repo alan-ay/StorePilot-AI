@@ -4,6 +4,8 @@ All notable changes to StorePilot are recorded in this file.
 
 ## Unreleased
 
+- Refresh selected product names, filters, navigation, and decision controls when
+  switching languages. Keep draft purchasing preferences until explicitly saved.
 - Refresh the selected adjustment reason when switching languages, preserving
   unsaved replenishment quantities and notes until the decision is saved.
 - Combine the two demo stores into `STORE-01`, preserving sales revenue and stock
