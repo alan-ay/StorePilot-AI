@@ -41,6 +41,13 @@ class DashboardTests(unittest.TestCase):
     def button(self, label):
         return next(b for b in self.app.button if b.label == label)
 
+    def assertBrowserSelection(self, widget, value, label):
+        self.assertEqual(widget.value, value)
+        self.assertIn(label, widget.options)
+        # Options alone do not update the browser's selected text or radio indicator.
+        self.assertTrue(widget.proto.set_value, widget.key)
+        self.assertEqual(widget.proto.raw_value, label)
+
     def test_all_pages_render_without_retraining(self):
         with patch(
             "storepilot.pipeline.StorePilotPipeline.run",
@@ -330,8 +337,10 @@ class DashboardTests(unittest.TestCase):
             self.app.selectbox(key="store_scope").options, ["全部门店", "STORE-01", "STORE-02"]
         )
         pd.testing.assert_frame_equal(self.app.session_state["active_data"].sales, imported.sales)
-        for lang in ["zh", "en"]:
+        self.app.selectbox(key="store_scope").set_value("全部门店").run()
+        for lang, label in [("en", "All stores"), ("zh", "全部门店")]:
             self.app.radio(key="language").set_value(lang).run()
+            self.assertBrowserSelection(self.app.selectbox(key="store_scope"), "全部门店", label)
             self.visit("门店调拨")
 
     def test_english_pages_translate_visible_content(self):
@@ -400,6 +409,11 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(reason.value, "库存复核")
         self.assertTrue(reason.proto.set_value)
         self.assertEqual(reason.proto.raw_value, "Stock check")
+        self.assertBrowserSelection(
+            next(r for r in self.app.radio if r.key.startswith("action:")),
+            "修改",
+            "Adjust quantity",
+        )
         self.assertEqual(
             next(n for n in self.app.number_input if n.key.startswith("qty:")).value, 24
         )
@@ -460,6 +474,88 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(feedback.iloc[0].final_qty, 24)
         self.assertEqual(feedback.iloc[0].note, "Checked stock / 已盘点")
 
+    def test_replenishment_selections_and_reason_placeholder_follow_language(self):
+        self.visit("补货清单")
+        self.app.selectbox(key="status_filter").set_value("全部商品").run()
+        self.app.selectbox(key="category_filter").set_value("家居清洁").run()
+        self.app.selectbox(key="review_item").set_value(("STORE-01", "SKU007")).run()
+        labels = {
+            "en": [
+                "Replenishment",
+                "Household cleaning",
+                "All products",
+                "Bin bags (20 pack) · STORE-01",
+                "Use suggested quantity",
+                "Choose a reason (required for adjustments or skipped purchases)",
+            ],
+            "zh": [
+                "补货清单",
+                "家居清洁",
+                "全部商品",
+                "垃圾袋 20只装 · STORE-01",
+                "按建议补货",
+                "请选择（调整或不采购时必填）",
+            ],
+        }
+        for language in ["en", "zh", "en"]:
+            self.app.radio(key="language").set_value(language).run()
+            self.assertNoFailure()
+            selections = [
+                (self.app.radio(key="nav"), "补货清单"),
+                (self.app.selectbox(key="category_filter"), "家居清洁"),
+                (self.app.selectbox(key="status_filter"), "全部商品"),
+                (self.app.selectbox(key="review_item"), ("STORE-01", "SKU007")),
+                (next(r for r in self.app.radio if r.key.startswith("action:")), "接受"),
+                (next(s for s in self.app.selectbox if s.key.startswith("reason:")), ""),
+            ]
+            for (widget, value), label in zip(selections, labels[language], strict=True):
+                with self.subTest(language=language, widget=widget.key):
+                    self.assertBrowserSelection(widget, value, label)
+
+        # An already-open session from before this fix also needs its labels refreshed.
+        del self.app.session_state["choice_label_language"]
+        self.app.run()
+        self.assertNoFailure()
+        self.assertBrowserSelection(
+            self.app.selectbox(key="review_item"),
+            ("STORE-01", "SKU007"),
+            "Bin bags (20 pack) · STORE-01",
+        )
+
+    def test_trend_product_and_horizon_selections_follow_language(self):
+        self.visit("销售走势")
+        self.app.selectbox(key="trend_sku").set_value("SKU007").run()
+        self.app.selectbox(key="trend_horizon").set_value(14).run()
+        for language, product, horizon in [
+            ("en", "Bin bags (20 pack)", "14 days"),
+            ("zh", "垃圾袋 20只装", "14 天"),
+        ]:
+            self.app.radio(key="language").set_value(language).run()
+            self.assertNoFailure()
+            with self.subTest(language=language):
+                self.assertBrowserSelection(self.app.selectbox(key="trend_sku"), "SKU007", product)
+                self.assertBrowserSelection(self.app.selectbox(key="trend_horizon"), 14, horizon)
+
+    def test_unsaved_policy_selection_follows_language_without_applying_policy(self):
+        self.visit("数据与设置")
+        original = self.app.session_state["policy"]
+        self.app.selectbox(key="policy_name").set_value("保守").run()
+        self.app.checkbox(key="policy_budget_enabled").check().run()
+        self.app.number_input(key="policy_budget").set_value(1200.0).run()
+        for language, label in [("en", "Lean stock"), ("zh", "控制库存")]:
+            self.app.radio(key="language").set_value(language).run()
+            self.assertNoFailure()
+            with self.subTest(language=language):
+                widget = self.app.selectbox(key="policy_name")
+                self.assertBrowserSelection(widget, "保守", label)
+                self.assertEqual(widget.proto.form_id, "")
+                self.assertEqual(self.app.number_input(key="policy_budget").value, 1200.0)
+                self.assertEqual(self.app.session_state["policy"], original)
+        self.button("保存备货偏好").click().run()
+        self.assertNoFailure()
+        self.assertEqual(self.app.session_state["policy"].name, "保守")
+        self.assertEqual(self.app.session_state["policy"].max_purchase_budget, 1200)
+
     def test_english_import_errors_and_examples(self):
         self.app.radio(key="language").set_value("en").run()
         self.visit("数据与设置")
@@ -508,6 +604,9 @@ class DashboardTests(unittest.TestCase):
         names = self.app.dataframe[0].value["Product"].tolist()
         self.assertTrue(set(names).issubset(set(data.products.product_name)))
         self.app.radio(key="language").set_value("zh").run()
+        selected = self.app.selectbox(key="review_item")
+        name = data.products.set_index("sku").loc[selected.value[1], "product_name"]
+        self.assertBrowserSelection(selected, selected.value, f"{name} · {selected.value[0]}")
         self.assertEqual(self.app.session_state["source"], "门店数据")
         self.assertTrue(self.app.session_state["active_data"].products.equals(data.products))
 

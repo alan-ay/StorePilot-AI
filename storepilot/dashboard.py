@@ -84,6 +84,24 @@ def option_labels(options, formatter=t):
     return {value: formatter(value) for value in options}.get
 
 
+def refresh_choice_labels():
+    """Re-send selected values with their new labels after a language change."""
+    keys = {
+        "nav",
+        "store_scope",
+        "category_filter",
+        "status_filter",
+        "review_item",
+        "trend_sku",
+        "trend_horizon",
+        "policy_name",
+    }
+    for key in list(st.session_state):
+        if key in keys or key.startswith(("action:", "reason:")):
+            # Streamlit otherwise keeps the old browser label for a stable widget key.
+            st.session_state[key] = st.session_state[key]
+
+
 def display_frame(frame, *, rename_columns=True):
     selected = frame.copy()
     if "status" in selected:
@@ -380,12 +398,13 @@ def replenishment(data, base, rec, store, repo, scope):
         identity = f"{scope}:{store_id}:{sku}"
         prior = reviews[(reviews.store_id == store_id) & (reviews.sku == sku)]
         default = int(prior.iloc[0].final_qty) if not prior.empty else int(row.suggested_order_qty)
+        action_key = f"action:{identity}"
+        st.session_state.setdefault(action_key, prior.iloc[0].action if not prior.empty else "接受")
         action = st.radio(
             t("处理方式"),
             ["接受", "修改", "拒绝"],
-            index=["接受", "修改", "拒绝"].index(prior.iloc[0].action) if not prior.empty else 0,
             horizontal=True,
-            key=f"action:{identity}",
+            key=action_key,
             format_func={
                 key: t(label)
                 for key, label in {
@@ -823,11 +842,12 @@ def settings(data, base, rec, store, repo, scope, policy):
         [t("备货偏好"), t("导入数据"), t("计算与数据说明")]
     )
     with settings_tab:
-        with st.form("policy_form"):
+        # Track draft choices before a language change; apply them only on Save.
+        with st.container(key="policy_form", border=True):
+            st.session_state.setdefault("policy_name", policy.name)
             name = st.selectbox(
                 t("经营偏好"),
                 ["保守", "平衡", "增长"],
-                index=["保守", "平衡", "增长"].index(policy.name),
                 format_func={
                     key: t(label)
                     for key, label in {
@@ -875,7 +895,7 @@ def settings(data, base, rec, store, repo, scope, policy):
                 help=t("用于估算安全库存的目标，不是实际服务水平的保证。"),
             )
             st.caption(t("保存后会重新计算建议并建立新的审核批次，已有采购记录会保留。"))
-            save = st.form_submit_button(t("保存备货偏好"), type="primary")
+            save = st.button(t("保存备货偏好"), key="save_policy", type="primary")
         if save:
             new_policy = StrategyConfig.preset(name, amount if enabled else None)
             if custom:
@@ -1026,6 +1046,9 @@ def settings(data, base, rec, store, repo, scope, policy):
 def main():
     if "language" not in st.session_state:
         st.session_state["language"] = "zh"
+    if st.session_state.get("choice_label_language") != language():
+        refresh_choice_labels()
+        st.session_state["choice_label_language"] = language()
     st.set_page_config(
         page_title=t("StorePilot · 门店工作台"), layout="wide", initial_sidebar_state="expanded"
     )
