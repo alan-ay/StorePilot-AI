@@ -1,12 +1,20 @@
-# StorePilot-AI: A closed-loop AI system for autonomous retail operations
+# StorePilot: fashion research for independent retailers
 ## Overview
-StorePilot intends to develop an AI-powered deicision making system, targeting grocery stores and small retailing scenarios. This system should be functional in providing fully considered suggestions regarding replenishment, allocation, promotion, inventory reduction and procurement recommendations.
+StorePilot helps a shop owner investigate affordable fashion before deciding what
+to stock. Talk to the fashion scout, inspect recent sources, compare search
+interest and retailer prices, then record your own decision. The focus is wearable
+clothing for everyday customers, with evidence the owner can question.
+
+The research assistant is a prototype with bounded tools, not an autonomous buyer.
+The existing inventory workbench remains available for sales forecasting,
+replenishment and locally approved purchase records.
 ## Contents
 
 - [Overview](#overview)
 - [Features](#features)
 - [Outcome](#daily-workflow)
 - [Start](#getting-started)
+- [Fashion scout](#fashion-scout)
 - [Forecast evaluation](#forecast-evaluation)
 - [Input_data](#input-data)
 - [Structure](#project-structure)
@@ -19,6 +27,10 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 
 ## Features
 
+- conversational fashion research with Google Gemini choosing read-only research tools;
+- recent public search excerpts, Google Trends checks and retailer price examples through SerpApi;
+- source-linked observations, interpretations and suggestions, with a local research journal;
+- owner decisions: keep watching, consider a small trial, or pass, with notes for later conversations;
 - 1/7/30-day SKU demand forecasts with uncertainty ranges;
 - historical forecast evaluation against weekly-repeat and 28-day-average baselines;
 - adjustable conservative, balanced and growth strategies;
@@ -56,7 +68,9 @@ streamlit run app.py
 ```
 
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
-The app opens with labelled sample data for one store, `STORE-01`. Sales and stock
+The app opens on **Fashion scout / 时尚侦察员**, with an optional, clearly labelled
+example conversation. The inventory workbench has sample data for one store,
+`STORE-01`. Sales and stock
 from the original two demo stores are combined, preserving total quantities and
 sales revenue. The store is selected automatically; transfer navigation appears
 only when multiple stores are imported. The demo and downloadable
@@ -71,7 +85,36 @@ values follow the selected language; import column names stay unchanged. Amounts
 remain in CNY in both languages.
 
 Import your own files through **Data & settings → Import data**
-(**数据与设置 → 导入数据**). No external model service or API key is needed.
+(**数据与设置 → 导入数据**). The inventory tools and example walkthrough work
+without API keys. Live fashion research requires the services below.
+
+## Fashion scout
+
+1. Choose **Live research** and select your store's country. Add your city, customer
+   group, clothing categories and typical selling-price range where useful.
+2. Connect a **Gemini API key** for the conversational model and a **SerpApi key**
+   for search, interest-over-time and retailer-listing data. Password fields keep
+   keys out of exported research and the local journal. You can instead configure
+   `GEMINI_API_KEY` and `SERPAPI_API_KEY` in the server environment.
+3. Ask a practical question, for example: “I sell casual womenswear at €25–60 in
+   Germany. Which everyday trouser styles should I investigate this autumn?
+   Check search interest and affordable examples, and explain what is uncertain.”
+4. Follow up naturally: “Those look too formal. What would suit university
+   students?” or “What evidence argues against trying that style?”
+5. Open the cited sources and **Evidence and working notes**. Record your own
+   judgement under **Your decision**. This does not submit orders or change stock.
+
+Each turn allows at most six data requests and seven model requests. Questions,
+store context, recent conversation/evidence and saved decision notes are sent to
+the model; search phrases go to the data provider. Provider charges may apply.
+There are no background searches. Successful replies and decisions stay in local
+SQLite journals; the example uses a separate journal.
+
+This version checks search attention and retail availability, not what “most
+people love.” Instagram searches cover only publicly indexed excerpts. It does
+not connect directly to Instagram engagement analytics or Amazon sales data, and
+does not yet estimate how many weeks a style takes to reach your customers.
+See [setup, architecture and research limits](docs/FASHION_SCOUT.md).
 
 ## Forecast evaluation
 
@@ -124,6 +167,9 @@ storepilot/
 ├── app.py                       Streamlit dashboard
 ├── storepilot/
 │   ├── forecasting.py          demand model and uncertainty intervals
+│   ├── fashion_agent.py        bounded research agent and owner-decision journal
+│   ├── fashion_sources.py      search, interest and retailer-price tools
+│   ├── fashion_page.py         conversation and evidence interface
 │   ├── evaluation.py           historical comparisons, scores and reports
 │   ├── evaluate.py             reproducible experiment command
 │   ├── optimization.py         reorder, budget and transfer decisions
@@ -149,6 +195,11 @@ flowchart TD
 ```
 
 ## Current scope
+
+The fashion scout's adapters and conversations have automated tests with recorded
+response shapes and test doubles. A live end-to-end run requires your provider
+credentials and has not been verified against your accounts. No real-world trend
+prediction or purchasing benefit has been established yet.
 
 The core calculations, schemas, feedback persistence and exports are working.
 For a commercial deployment, add POS/supplier integrations, authentication,

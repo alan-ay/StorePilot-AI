@@ -31,6 +31,7 @@ from .workbench import dataset_key, decision_scope, download_csv, scenario_plan,
 
 PAGES = [
     "今日概览",
+    "时尚侦察员",
     "补货清单",
     "采购与记录",
     "销售走势",
@@ -1221,7 +1222,9 @@ def main():
         st.session_state["store_scope"] = stores[0]
     if st.session_state.get("store_scope") not in stores:
         st.session_state["store_scope"] = stores[0]
-    if st.session_state.get("nav") not in pages:
+    if "nav" not in st.session_state:
+        st.session_state["nav"] = "时尚侦察员"
+    elif st.session_state["nav"] not in pages:
         st.session_state["nav"] = pages[0]
     with st.sidebar:
         st.radio(
@@ -1252,8 +1255,14 @@ def main():
             label_visibility="collapsed",
         )
         st.divider()
-        st.caption(t("{0} · 销售截至 {1:%m月%d日}", t(source), data.sales.date.max()))
-        st.caption(t("更改数据与备货偏好，请前往数据与设置。"))
+        if page != "时尚侦察员":
+            st.caption(t("{0} · 销售截至 {1:%m月%d日}", t(source), data.sales.date.max()))
+            st.caption(t("更改数据与备货偏好，请前往数据与设置。"))
+    if page == "时尚侦察员":
+        from .fashion_page import render_fashion_scout
+
+        render_fashion_scout(language())
+        return
     st.markdown(
         f'<div class="sp-top"><span class="sp-badge">{escape(t(source))}</span>'
         f"<span>{escape(t(store) if store == '全部门店' else store)}</span>"

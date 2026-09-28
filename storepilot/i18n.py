@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 EN = {
+    "时尚侦察员": "Fashion scout",
     "预测评估": "Forecast evaluation",
     "重复上周销量": "Repeat last week",
     "近28天平均销量": "28-day average",

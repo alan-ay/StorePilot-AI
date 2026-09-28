@@ -23,7 +23,9 @@ class DashboardTests(unittest.TestCase):
         self.database = Path(self.temp.name) / "test.db"
         self.env = patch.dict(os.environ, {"STOREPILOT_DB": str(self.database)})
         self.env.start()
-        self.app = AppTest.from_file(str(APP), default_timeout=90).run()
+        self.app = AppTest.from_file(str(APP), default_timeout=90)
+        self.app.session_state["nav"] = "今日概览"
+        self.app.run()
         self.assertNoFailure()
 
     def tearDown(self):
@@ -58,6 +60,7 @@ class DashboardTests(unittest.TestCase):
                 "采购与记录",
                 "销售走势",
                 "预测评估",
+                "时尚侦察员",
                 "情景测算",
                 "数据与设置",
                 "今日概览",
@@ -419,6 +422,7 @@ class DashboardTests(unittest.TestCase):
         ):
             for page in [
                 "今日概览",
+                "时尚侦察员",
                 "补货清单",
                 "采购与记录",
                 "销售走势",

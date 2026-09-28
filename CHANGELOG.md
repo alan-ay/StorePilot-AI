@@ -4,6 +4,12 @@ All notable changes to StorePilot are recorded in this file.
 
 ## Unreleased
 
+- Make Fashion scout the initial page: an owner can discuss affordable clothing,
+  inspect evidence and make the final buying decision. Gemini selects bounded
+  research tools for public search, Google Trends and retail prices via SerpApi.
+- Keep research conversations and owner decisions in separate local journals.
+  Add explicit demo/live modes, source references, tool records and request limits.
+  Direct Amazon sales and Instagram engagement integrations are not included.
 - Add a bilingual forecast-evaluation page comparing recursive gradient boosting,
   weekly-repeat forecasts and a 28-day average at historical cutoffs. Include
   product scores, missing-history exclusions and downloadable experiment records.
