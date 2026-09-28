@@ -9,6 +9,7 @@ build/
 dist/
 storepilot.db
 demo_output/
+evaluation_output/
 .DS_Store
 
 *-demo.db

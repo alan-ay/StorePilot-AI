@@ -4,6 +4,11 @@ All notable changes to StorePilot are recorded in this file.
 
 ## Unreleased
 
+- Add a bilingual forecast-evaluation page comparing recursive gradient boosting,
+  weekly-repeat forecasts and a 28-day average at historical cutoffs. Include
+  product scores, missing-history exclusions and downloadable experiment records.
+- Add a reproducible evaluation command and document the fixed-date demo results,
+  metric definitions and limits of synthetic-data evidence.
 - Refresh selected product names, filters, navigation, and decision controls when
   switching languages. Keep draft purchasing preferences until explicitly saved.
 - Refresh the selected adjustment reason when switching languages, preserving

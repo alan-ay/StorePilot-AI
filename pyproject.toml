@@ -32,6 +32,7 @@ dev = ["pytest>=8.0", "ruff>=0.4"]
 
 [project.scripts]
 storepilot-demo = "storepilot.demo:main"
+storepilot-evaluate = "storepilot.evaluate:main"
 
 [tool.setuptools.packages.find]
 include = ["storepilot*"]

@@ -15,6 +15,13 @@ import streamlit as st
 
 from .config import ScenarioConfig, StrategyConfig
 from .data import DEMO_CATALOG_VERSION, RetailData, generate_demo_data, merge_stores, validate_data
+from .evaluation import (
+    EvaluationConfig,
+    evaluate_forecasts,
+    evaluation_archive,
+    evaluation_report,
+    score_table,
+)
 from .i18n import ValidationError, demo_label, translate
 from .optimization import InventoryOptimizer
 from .pipeline import StorePilotPipeline
@@ -22,7 +29,16 @@ from .reporting import generate_report
 from .repository import FeedbackRepository
 from .workbench import dataset_key, decision_scope, download_csv, scenario_plan, scoped
 
-PAGES = ["今日概览", "补货清单", "采购与记录", "销售走势", "情景测算", "门店调拨", "数据与设置"]
+PAGES = [
+    "今日概览",
+    "补货清单",
+    "采购与记录",
+    "销售走势",
+    "预测评估",
+    "情景测算",
+    "门店调拨",
+    "数据与设置",
+]
 STATUS = {
     "高缺货风险": "优先补货",
     "需要关注": "计划补货",
@@ -95,6 +111,7 @@ def refresh_choice_labels():
         "trend_sku",
         "trend_horizon",
         "policy_name",
+        "evaluation_horizon",
     }
     for key in list(st.session_state):
         if key in keys or key.startswith(("action:", "reason:")):
@@ -171,6 +188,11 @@ def analyse(data):
 def sample_data(catalog_version=DEMO_CATALOG_VERSION):
     """Include the demo version in the cache key when products or stores change."""
     return generate_demo_data()
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def backtest(data, config):
+    return evaluate_forecasts(data, config)
 
 
 def selected_plan(data, base, policy):
@@ -836,6 +858,120 @@ def transfers(data, base, rec, store):
     )
 
 
+def forecast_evaluation(data, store):
+    heading("预测评估", "用过去的截止日比较预测模型，检查它是否优于简单销量规律。")
+    local = RetailData(scoped(data.sales, store), data.products, scoped(data.inventory, store))
+    if local.sales.empty:
+        empty("该门店暂无销售历史。请在数据与设置中导入销售记录后查看经营概况。")
+        return
+    source = st.session_state["source"]
+    if source == "演示数据":
+        st.info(t("这是模拟演示数据的实验，不代表真实门店的预测效果或经营收益。"))
+    previous_config = st.session_state.get("evaluation_config", EvaluationConfig())
+    left, right = st.columns(2)
+    with left:
+        origins = st.number_input(
+            t("历史截止日数量"), 1, 5, previous_config.origins, key="evaluation_origins"
+        )
+    with right:
+        step = st.number_input(
+            t("截止日间隔（天）"), 1, 90, previous_config.step_days, key="evaluation_step"
+        )
+    config = EvaluationConfig(origins=origins, step_days=step)
+    st.session_state["evaluation_config"] = config
+    st.caption(
+        t(
+            "比较 1、7、30 天窗口。当前设置需要至少 {0} 天连续每日记录；缺失记录不会当作零销量。",
+            config.min_train_days + max(config.horizons) + (origins - 1) * step,
+        )
+    )
+    key = (dataset_key(local, source), config)
+    if st.button(t("运行预测评估"), type="primary", key="run_evaluation"):
+        st.session_state.pop("evaluation_result", None)
+        try:
+            with st.spinner(t("正在按历史截止日训练并比较模型…")):
+                result = backtest(local, config)
+            st.session_state["evaluation_result"] = (key, result)
+        except ValueError as exc:
+            st.error(t("评估未完成：{0}", exc))
+    saved = st.session_state.get("evaluation_result")
+    if saved is None or saved[0] != key:
+        st.caption(t("点击运行以评估当前数据和设置。浏览页面与切换语言不会重新训练。"))
+        return
+    result = saved[1]
+    manifest = result.manifest
+    st.write(
+        t(
+            "销售日期：{0} 至 {1}。评估 {2} 条商品序列，排除 {3} 条。",
+            manifest["sales_start"],
+            manifest["sales_end"],
+            manifest["evaluated_series"],
+            manifest["excluded_series"],
+        )
+    )
+    st.caption(t("历史截止日：{0}。", ", ".join(fold["origin"] for fold in manifest["folds"])))
+    st.dataframe(score_table(result.scores, language()), hide_index=True, width="stretch")
+    st.session_state.setdefault(
+        "evaluation_horizon", st.session_state.get("evaluation_view_horizon", 7)
+    )
+    horizon = st.selectbox(
+        t("查看评估窗口"),
+        config.horizons,
+        key="evaluation_horizon",
+        format_func=option_labels(config.horizons, lambda value: t("{0} 天", value)),
+    )
+    st.session_state["evaluation_view_horizon"] = horizon
+    chart = score_table(result.scores[result.scores.horizon_days == horizon], language())
+    st.bar_chart(chart, x=t("模型"), y=t("每日 MAE"))
+    st.caption(t("误差越低越好。正偏差表示预测偏高；实际销量为零时 WAPE 留空。"))
+    with st.expander(t("查看商品明细与排除记录")):
+        detail = result.sku_scores[result.sku_scores.horizon_days == horizon].reset_index(drop=True)
+        identifiers = detail[["store_id", "sku"]].merge(
+            data.products[["sku", "product_name"]], on="sku", how="left", validate="many_to_one"
+        )
+        st.dataframe(
+            pd.concat([display_frame(identifiers), score_table(detail, language())], axis=1),
+            hide_index=True,
+            width="stretch",
+        )
+        if not result.excluded.empty:
+            table(result.excluded)
+    with st.expander(t("评估方法与限制")):
+        for message in [
+            "各模型只使用截止日及之前的数据。梯度提升逐日递归预测；两个基线分别重复最后一周和固定使用最近28天平均销量。",
+            "梯度提升沿用应用的缺货修正训练目标；两个基线使用历史实际销量。未来促销与价格保持应用的默认假设。",
+            "每个窗口评估截止日后的第1天至第H天；每日 MAE 衡量逐日绝对误差，窗口总量 MAE 衡量每个商品在整个窗口内的销量总量误差。",
+            "实际销量直接来自记录，不用估算需求替代。缺货会压低实际销量，因此另列非缺货日 MAE；这不能证明真实需求准确率。",
+            "历史记录不连续或训练期不足的商品会明确排除。三个模型使用相同的商品与评估日期。",
+            "结果仅衡量历史销量预测误差，不证明库存成本下降。此报告不评估预测区间覆盖率，也未实现自动模型选择。",
+        ]:
+            st.write(t(message))
+        if manifest["overlapping_windows"]:
+            st.write(
+                t(
+                    "评估窗口存在重叠；同一销售日可能被多个截止日预测，汇总结果不应视为独立样本的统计显著性证据。"
+                )
+            )
+    st.caption(t("对比不会自动更换应用中的模型，也不会修改备货偏好、库存或采购记录。"))
+    left, right = st.columns(2)
+    with left:
+        st.download_button(
+            t("下载评估报告"),
+            evaluation_report(result, source, language()),
+            "forecast-evaluation.md",
+            "text/markdown",
+            key="evaluation_report",
+        )
+    with right:
+        st.download_button(
+            t("下载完整实验记录"),
+            evaluation_archive(result, source, language()),
+            "forecast-evaluation.zip",
+            "application/zip",
+            key="evaluation_archive",
+        )
+
+
 def settings(data, base, rec, store, repo, scope, policy):
     heading("数据与设置", "更新经营数据、调整备货偏好，或查看计算依据。")
     settings_tab, import_tab, method_tab = st.tabs(
@@ -1152,6 +1288,8 @@ def main():
             purchases(data, base, rec, store, repo, scope, policy)
         elif page == "销售走势":
             trends(data, base, rec, store)
+        elif page == "预测评估":
+            forecast_evaluation(data, store)
         elif page == "情景测算":
             scenarios(data, base, rec, store, policy, scope)
         elif page == "门店调拨":

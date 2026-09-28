@@ -57,6 +57,7 @@ class DashboardTests(unittest.TestCase):
                 "补货清单",
                 "采购与记录",
                 "销售走势",
+                "预测评估",
                 "情景测算",
                 "数据与设置",
                 "今日概览",
@@ -108,6 +109,72 @@ class DashboardTests(unittest.TestCase):
         self.assertAlmostEqual(self.app.session_state["scenario_result"][1].traffic_change_pct, 20)
         self.assertEqual(self.app.session_state["policy"].name, "平衡")
         self.assertTrue(FeedbackRepository(self.database.with_name("test-demo.db")).orders().empty)
+
+    def test_evaluation_run_survives_language_switch_and_preserves_operating_state(self):
+        self.visit("预测评估")
+        original_data = self.app.session_state["active_data"]
+        policy = self.app.session_state["policy"]
+        self.app.number_input(key="evaluation_origins").set_value(1)
+        self.app.button(key="run_evaluation").click().run()
+        self.assertNoFailure()
+        saved_key, result = self.app.session_state["evaluation_result"]
+        self.assertEqual(len(result.scores), 9)
+        self.assertEqual(set(result.predictions.store_id), {"STORE-01"})
+        self.assertIn("每日 MAE", self.app.dataframe[0].value.columns)
+        with patch(
+            "storepilot.dashboard.backtest", side_effect=AssertionError("unexpected retrain")
+        ):
+            with patch("streamlit.download_button") as download:
+                self.app.radio(key="language").set_value("en").run()
+            self.assertNoFailure()
+            self.assertBrowserSelection(self.app.selectbox(key="evaluation_horizon"), 7, "7 days")
+            self.assertIn("Daily MAE", self.app.dataframe[0].value.columns)
+            for kind in ["markdown", "caption", "info"]:
+                for element in self.app.get(kind):
+                    self.assertNotRegex(element.value, r"[\u4e00-\u9fff]")
+            for frame in self.app.dataframe:
+                for label in list(frame.value.columns) + list(frame.value.to_numpy().flat):
+                    if isinstance(label, str):
+                        self.assertNotRegex(label, r"[\u4e00-\u9fff]")
+            report = next(
+                call.args[1]
+                for call in download.call_args_list
+                if call.args[2] == "forecast-evaluation.md"
+            )
+            self.assertIn(result.manifest["dataset_id"], report)
+            self.assertIn("synthetic demo data", report)
+            self.assertNotRegex(report, r"[\u4e00-\u9fff]")
+            self.app.radio(key="language").set_value("zh").run()
+            self.assertBrowserSelection(self.app.selectbox(key="evaluation_horizon"), 7, "7 天")
+            self.assertEqual(self.app.session_state["evaluation_result"][0], saved_key)
+            self.visit("今日概览")
+            self.visit("预测评估")
+            self.assertEqual(self.app.number_input(key="evaluation_origins").value, 1)
+            self.assertTrue(list(self.app.dataframe))
+            # Settings that no longer match the result must hide its tables and downloads.
+            self.app.number_input(key="evaluation_step").set_value(14).run()
+            self.assertNoFailure()
+            self.assertFalse(list(self.app.dataframe))
+            self.assertFalse(list(self.app.get("download_button")))
+        self.assertEqual(self.app.session_state["policy"], policy)
+        self.assertTrue(self.app.session_state["active_data"].sales.equals(original_data.sales))
+        repo = FeedbackRepository(self.database.with_name("test-demo.db"))
+        self.assertTrue(repo.orders().empty)
+        from storepilot.workbench import dataset_key, decision_scope
+
+        self.assertTrue(
+            repo.reviews(decision_scope(dataset_key(original_data, "演示数据"), policy)).empty
+        )
+
+    def test_evaluation_reports_insufficient_history_in_english(self):
+        self.app.radio(key="language").set_value("en").run()
+        self.visit("预测评估")
+        self.app.number_input(key="evaluation_origins").set_value(5)
+        self.app.number_input(key="evaluation_step").set_value(90)
+        self.app.button(key="run_evaluation").click().run()
+        self.assertFalse(list(self.app.exception))
+        self.assertTrue(any("460 consecutive days" in error.value for error in self.app.error))
+        self.assertNotIn("evaluation_result", self.app.session_state)
 
     def test_policy_and_reset_from_single_store(self):
         self.assertEqual(self.app.selectbox(key="store_scope").value, "STORE-01")
@@ -355,6 +422,7 @@ class DashboardTests(unittest.TestCase):
                 "补货清单",
                 "采购与记录",
                 "销售走势",
+                "预测评估",
                 "情景测算",
                 "数据与设置",
             ]:

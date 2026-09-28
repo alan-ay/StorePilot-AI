@@ -7,6 +7,7 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 - [Features](#features)
 - [Outcome](#daily-workflow)
 - [Start](#getting-started)
+- [Forecast evaluation](#forecast-evaluation)
 - [Input_data](#input-data)
 - [Structure](#project-structure)
 - [Decision](#decision-flow)
@@ -19,6 +20,7 @@ StorePilot intends to develop an AI-powered deicision making system, targeting g
 ## Features
 
 - 1/7/30-day SKU demand forecasts with uncertainty ranges;
+- historical forecast evaluation against weekly-repeat and 28-day-average baselines;
 - adjustable conservative, balanced and growth strategies;
 - replenishment, overstock, stockout and expiry-risk recommendations;
 - price, promotion, holiday, traffic and supplier-delay simulations;
@@ -71,6 +73,33 @@ remain in CNY in both languages.
 Import your own files through **Data & settings → Import data**
 (**数据与设置 → 导入数据**). No external model service or API key is needed.
 
+## Forecast evaluation
+
+Open **Forecast evaluation / 预测评估** and click **Run forecast evaluation**.
+It compares the current gradient-boosting model with two simple baselines at
+historical cutoffs, using only the data available at each cutoff. The 1-, 7- and
+30-day windows show daily error, total-demand error, WAPE and bias. Product-level
+scores and excluded series are available below the comparison.
+
+The default dashboard settings need at least 114 consecutive daily records per
+store-product series. Include explicit zero-sales days; missing dates are not
+treated as zero sales for evaluation. Computation runs on demand and results
+survive language changes and navigation. Download the report or the complete
+experiment ZIP to inspect predictions, scores and settings.
+
+For a fixed-date demo experiment that can be rerun from the terminal:
+
+```bash
+python -m storepilot.evaluate --output evaluation_output
+```
+
+This uses 210 days of synthetic data, seed 42, ending on 2026-09-18, with three
+cutoffs 30 days apart. See [the evaluation guide](docs/EVALUATION.md) for imported
+data and metric definitions, and [the demo report](docs/forecast-evaluation-demo.md)
+for the recorded experiment. Synthetic results do not establish real-store
+accuracy or inventory savings. Evaluation does not replace the production model
+or change purchasing decisions automatically.
+
 ## Input data
 
 ### `sales.csv`
@@ -95,6 +124,8 @@ storepilot/
 ├── app.py                       Streamlit dashboard
 ├── storepilot/
 │   ├── forecasting.py          demand model and uncertainty intervals
+│   ├── evaluation.py           historical comparisons, scores and reports
+│   ├── evaluate.py             reproducible experiment command
 │   ├── optimization.py         reorder, budget and transfer decisions
 │   ├── scenarios.py            what-if adjustments
 │   ├── repository.py           SQLite feedback and model-run history
