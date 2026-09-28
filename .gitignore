@@ -8,6 +8,7 @@ venv/
 build/
 dist/
 storepilot.db
+*-fashion.db
 demo_output/
 evaluation_output/
 .DS_Store
